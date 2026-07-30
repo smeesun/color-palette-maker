@@ -1,5 +1,7 @@
 import customtkinter as ctk
-from PIL import Image
+import tkinter as tk
+from PIL import Image, ImageGrab
+
 
 
 # ======================================
@@ -7,6 +9,51 @@ from PIL import Image
 # ======================================
 ctk.set_appearance_mode("Light")
 ctk.set_default_color_theme("blue")
+
+# ======================================
+# ツールチップ
+# ======================================
+class ToolTip:
+
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tip_window = None
+
+        widget.bind("<Enter>", self.show_tip)
+        widget.bind("<Leave>", self.hide_tip)
+
+
+    def show_tip(self, event=None):
+
+        if self.tip_window or not self.text:
+            return
+
+        x = self.widget.winfo_rootx() + 10
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
+
+        self.tip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+
+        label = tk.Label(
+            tw,
+            text=self.text,
+            background="#FFFFFF",
+            foreground="black",
+            relief="solid",
+            borderwidth=1,
+            padx=6,
+            pady=2
+        )
+        label.pack()
+
+
+    def hide_tip(self, event=None):
+
+        if self.tip_window:
+            self.tip_window.destroy()
+            self.tip_window = None
 
 
 class App(ctk.CTk):
@@ -198,14 +245,14 @@ class App(ctk.CTk):
         self.space()
 
 
-    # ======================================
-    # サブタイトル
-    # ======================================
-
+# ======================================
+# サブタイトル
+# ======================================
         # ======================================
         # セレクト
         # ======================================
 
+        # セクションの枠
         self.select_frame = ctk.CTkFrame(
             self.scroll,
             fg_color="white"
@@ -216,17 +263,109 @@ class App(ctk.CTk):
             pady=10
         )
 
+        # 上ライン
+        self.section_line(self.select_frame)
 
+        # タイトル
         ctk.CTkLabel(
             self.select_frame,
             text="セレクト",
             font=("あめふりドロップス無料版", 22, "bold")
-        ).pack(anchor="w", padx=15)
+        ).pack(
+            anchor="w",
+            padx=15,
+            pady=8
+        )
+
+        # ------------------------------------
+        # 下ライン
+        self. section_line(self.select_frame)
+
+        # 余白
+        ctk. CTkFrame(
+            self. select_frame, 
+            height = 12, 
+            fg_color = "transparent"
+        ). pack(fill = "x")
+
+
+
+# ======================================
+# セレクト機能
+# ======================================    
+        # ------------------------------------
+        # 左側：スポイト＋カラーコード欄
+        # ------------------------------------
+        self. current_hex = "#FFFFFF"
+
+        select_content = ctk. CTkFrame(
+            self. select_frame,
+            fg_color = "transparent"
+        )
+        select_content. pack(
+            anchor = "w", 
+            padx=15, 
+            pady=(0, 15)
+        )
+
+        # スポイトボタン
+        self.eyedropper_btn = ctk.CTkButton(
+            select_content,
+            text="💉",
+            width=80,
+            corner_radius=50,
+            fg_color="#e6a5f8",
+            hover_color="#866091",
+            text_color="white",
+            command=self.start_eyedropper
+        )
+        self.eyedropper_btn.pack(anchor="w", pady=(0, 10))
+
+        ToolTip(self.eyedropper_btn, "スポイト")
+
+        
+        hex_row = ctk.CTkFrame(
+            select_content,
+            fg_color="transparent"
+        )
+        hex_row.pack(anchor="w")
+
+        self.hex_entry = ctk.CTkEntry(
+            hex_row,
+            width=80,
+            placeholder_text="#FFFFFF"
+        )
+        self.hex_entry.pack(side="left")
+        self.hex_entry.bind("<Return>", self.on_hex_entry_enter)
+
+        self.copy_btn = ctk.CTkButton(
+            hex_row,
+            text="📝",
+            width=40,
+            corner_radius=50,
+            fg_color="#e6a5f8",
+            hover_color="#866091",
+            text_color="white",
+            command=self.copy_hex_code
+        )
+        self.copy_btn.pack(side="left", padx=(5, 0))
+
+        ToolTip(self.copy_btn, "コピーする")
+
+
+        # 色プレビュー（拾った色を確認しやすいように追加）
+        self.color_preview = ctk.CTkLabel(
+            select_content,
+            text="",
+            width=40,
+            height=40,
+            fg_color=self.current_hex,
+            corner_radius=8
+        )
+        self.color_preview.pack(anchor="w", pady=(10, 0))
 
 
         self.space()
-
-
 
         # ======================================
         # カテゴリ
@@ -242,6 +381,8 @@ class App(ctk.CTk):
             pady=10
         )
 
+        # 上ライン
+        self.section_line(self.category_frame)
 
         ctk.CTkLabel(
             self.category_frame,
@@ -249,6 +390,8 @@ class App(ctk.CTk):
             font=("あめふりドロップス無料版", 22, "bold")
         ).pack(anchor="w", padx=15)
 
+        # 下ライン
+        self.section_line(self.category_frame)
 
         self.space()
 
@@ -268,6 +411,8 @@ class App(ctk.CTk):
             pady=10
         )
 
+        # 上ライン
+        self.section_line(self.preset_frame)
 
         ctk.CTkLabel(
             self.preset_frame,
@@ -275,6 +420,8 @@ class App(ctk.CTk):
             font=("あめふりドロップス無料版", 22, "bold")
         ).pack(anchor="w", padx=15)
 
+        # 下ライン
+        self.section_line(self.preset_frame)
 
         self.space()
 
@@ -294,6 +441,8 @@ class App(ctk.CTk):
             pady=10
         )
 
+        # 上ライン
+        self.section_line(self.recommend_frame)
 
         ctk.CTkLabel(
             self.recommend_frame,
@@ -301,8 +450,119 @@ class App(ctk.CTk):
             font=("あめふりドロップス無料版", 22, "bold")
         ).pack()
 
+        # 下ライン
+        self.section_line(self.recommend_frame)
 
         self.space()
+
+    # ======================================
+    # セクション用の区切り線（1本）
+    # ======================================
+    def section_line(self, parent):
+        line = tk.Canvas(
+            parent,
+            height=1,
+            bg="white",
+            highlightthickness=0
+        )
+        line.create_line(
+            0, 0, 1000, 0,
+            fill="#d0d0d0",
+             width=1
+        )
+        line.pack(fill="x", padx=10)
+
+    # ======================================
+    # スポイト機能
+    # ======================================
+    def start_eyedropper(self):
+
+        # 画面全体を覆う透明なオーバーレイを作成
+        self.overlay = tk.Toplevel(self)
+        self.overlay.attributes("-fullscreen", True)
+        self.overlay.attributes("-alpha", 0.01)   # ほぼ透明
+        self.overlay.attributes("-topmost", True)
+        self.overlay.configure(cursor="crosshair")
+
+        self.overlay.bind("<Motion>", self.preview_color)
+        self.overlay.bind("<Button-1>", self.pick_color)
+        self.overlay.bind("<Escape>", self.cancel_eyedropper)
+
+        self.overlay.focus_force()
+
+
+    def get_pixel_color(self, x, y):
+
+        # 1pxだけ切り取って取得（負荷軽減のため）
+        screenshot = ImageGrab.grab(bbox=(x, y, x + 1, y + 1))
+        rgb = screenshot.getpixel((0, 0))
+
+        return "#{:02x}{:02x}{:02x}".format(*rgb[:3])
+
+
+    def preview_color(self, event):
+
+        # マウスが動くたびに呼ばれる（確定はしない）
+        hex_color = self.get_pixel_color(event.x_root, event.y_root)
+
+        self.hex_entry.delete(0, "end")
+        self.hex_entry.insert(0, hex_color)
+        self. color_preview. configure(fg_color = hex_color)
+
+    
+    def pick_color(self, event):
+
+        # 左クリックされた瞬間に呼ばれる（確定する）
+        hex_color = self.get_pixel_color(event.x_root, event.y_root)
+
+        self.apply_color(hex_color)
+        self.overlay.destroy()
+
+
+    def cancel_eyedropper(self, event=None):
+
+        self.overlay.destroy()
+
+    # ======================================
+    # コピー処理
+    # ======================================
+    def copy_hex_code(self):
+
+        value = self.hex_entry.get().strip()
+
+        self.clipboard_clear()
+        self.clipboard_append(value)
+        self.update()
+
+    # ======================================
+    # カラーコード反映
+    # ======================================
+    def apply_color(self, hex_color):
+
+        self.current_hex = hex_color
+
+        self.hex_entry.delete(0, "end")
+        self.hex_entry.insert(0, hex_color)
+
+        self.color_preview.configure(fg_color=hex_color)
+
+
+    def on_hex_entry_enter(self, event=None):
+
+        value = self.hex_entry.get().strip()
+
+        if not value.startswith("#"):
+            value = "#" + value
+
+        # #RRGGBB形式かどうかの簡易チェック
+        if len(value) == 7:
+            try:
+                int(value[1:], 16)
+                self.apply_color(value)
+            except ValueError:
+                print("無効なカラーコードです")
+        else:
+            print("無効なカラーコードです")
 
 
     # ======================================
