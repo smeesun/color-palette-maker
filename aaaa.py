@@ -70,3 +70,8 @@ def start_animation():
 button.configure(command=start_animation)
 
 app.mainloop()
+
+
+
+#test
+#自宅でもgithubとVScodekaが連携されてるか確認
