@@ -1,6 +1,8 @@
 import customtkinter as ctk
 import tkinter as tk
-from PIL import Image, ImageGrab
+from PIL import Image, ImageGrab, ImageTk
+import colorsys
+import math
 
 
 
@@ -64,7 +66,7 @@ class App(ctk.CTk):
         # ======================================
         # ウィンドウ設定
         # ======================================
-        self.geometry("400x760")
+        self.geometry("400x690")
         self.title("COLpama")
 
         # サイズ固定
@@ -101,6 +103,8 @@ class App(ctk.CTk):
             padx=5,
             pady=5
         )
+        
+        ToolTip(home_btn, "トップへ戻る")
 
 
         # ======================================
@@ -293,20 +297,28 @@ class App(ctk.CTk):
 # ======================================
 # セレクト機能
 # ======================================    
+        # 左右を横並びにするための行
+        select_row = ctk.CTkFrame(
+            self.select_frame,
+            fg_color="transparent"
+        )
+        select_row.pack(
+            anchor="w",
+            padx=15,
+            pady=(0, 15),
+            fill="x"
+        )
+
         # ------------------------------------
         # 左側：スポイト＋カラーコード欄
         # ------------------------------------
-        self. current_hex = "#FFFFFF"
+        self.current_hex = "#FFFFFF"
 
-        select_content = ctk. CTkFrame(
-            self. select_frame,
-            fg_color = "transparent"
+        select_content = ctk.CTkFrame(
+            select_row,
+            fg_color="transparent"
         )
-        select_content. pack(
-            anchor = "w", 
-            padx=15, 
-            pady=(0, 15)
-        )
+        select_content.pack(side="left", anchor="n")
 
         # スポイトボタン
         self.eyedropper_btn = ctk.CTkButton(
@@ -323,7 +335,6 @@ class App(ctk.CTk):
 
         ToolTip(self.eyedropper_btn, "スポイト")
 
-        
         hex_row = ctk.CTkFrame(
             select_content,
             fg_color="transparent"
@@ -352,20 +363,79 @@ class App(ctk.CTk):
 
         ToolTip(self.copy_btn, "コピーする")
 
-
-        # 色プレビュー（拾った色を確認しやすいように追加）
+        # ------------------------------------
+        # 色プレビュー（大きく・中央）
+        # ------------------------------------
         self.color_preview = ctk.CTkLabel(
-            select_content,
+            self.select_frame,
             text="",
-            width=40,
-            height=40,
+            width=200,
+            height=80,
+            corner_radius=12,
             fg_color=self.current_hex,
-            corner_radius=8
+            border_width = 0,
+            border_color = "black"
         )
-        self.color_preview.pack(anchor="w", pady=(10, 0))
+        self.color_preview.pack(pady=(20, 15))
 
+        self. update_preview_border(self. current_hex)
+        
+
+        # ------------------------------------
+        # 右側：カラーピッカー（ホイール＋四角）
+        # ------------------------------------
+        self. wheel_size = 190
+        self. wheel_thickness = 22
+        self. square_size = 100
+
+        self. current_hue = 0.0
+        self. current_sat = 1.0
+        self. current_val = 1.0
+
+        self. ring_indicator_id = None
+        self. square_indicator_id = None
+
+        picker_frame = ctk.CTkFrame(
+            select_row,
+            fg_color="transparent"
+        )
+        picker_frame.pack(side="left", anchor="n", padx=(20, 0))
+
+        self. wheel_canvas = tk.Canvas(
+            picker_frame,
+            width = self. wheel_size,
+            height = self. wheel_size,
+            highlightthickness=0,
+            bg = "white",
+            cursor = "circle"
+        )
+        self.wheel_canvas.pack()
+
+        # リング画像を生成して貼り付け
+        wheel_img = self.build_color_wheel_image(self.wheel_size, self.wheel_thickness)
+        self.wheel_photo = ImageTk.PhotoImage(wheel_img)
+        self.wheel_canvas.create_image(0, 0, image=self.wheel_photo, anchor="nw")
+
+        # 四角（彩度・明度）画像
+        self.square_photo = None
+        self.square_image_id = None
+        self.draw_sv_square()
+
+        # 選択位置の白丸（初期表示）
+        self.update_indicators()
+
+        # クリック・ドラッグで色を選択
+        self.wheel_canvas.bind("<Button-1>", self.on_wheel_click)
+        self.wheel_canvas.bind("<B1-Motion>", self.on_wheel_click)
 
         self.space()
+
+
+        # ======================================
+        # 工事中画像（後々削除）🐻
+        # ======================================
+        self.prep_image = self.load_preparation_image()
+
 
         # ======================================
         # カテゴリ
@@ -392,6 +462,14 @@ class App(ctk.CTk):
 
         # 下ライン
         self.section_line(self.category_frame)
+
+
+        # 工事中画像差し込み
+        ctk.CTkLabel(
+            self.category_frame,
+            text="",
+            image=self.prep_image
+        ).pack(pady=10)
 
         self.space()
 
@@ -423,6 +501,14 @@ class App(ctk.CTk):
         # 下ライン
         self.section_line(self.preset_frame)
 
+
+        # 工事中画像差し込み
+        ctk.CTkLabel(
+            self.preset_frame,
+            text="",
+            image=self.prep_image
+        ).pack(pady=10)
+
         self.space()
 
 
@@ -453,7 +539,19 @@ class App(ctk.CTk):
         # 下ライン
         self.section_line(self.recommend_frame)
 
+
+        # 工事中画像差し込み
+        ctk.CTkLabel(
+            self.recommend_frame,
+            text="",
+            image=self.prep_image
+        ).pack(pady=10)
+
+
         self.space()
+        
+
+#=============クラス直下（__init__の外）のものはここに
 
     # ======================================
     # セクション用の区切り線（1本）
@@ -471,6 +569,7 @@ class App(ctk.CTk):
              width=1
         )
         line.pack(fill="x", padx=10)
+
 
     # ======================================
     # スポイト機能
@@ -508,6 +607,8 @@ class App(ctk.CTk):
         self.hex_entry.delete(0, "end")
         self.hex_entry.insert(0, hex_color)
         self. color_preview. configure(fg_color = hex_color)
+        self. update_preview_border(hex_color)
+        self. sync_picker_from_hex(hex_color)
 
     
     def pick_color(self, event):
@@ -516,12 +617,14 @@ class App(ctk.CTk):
         hex_color = self.get_pixel_color(event.x_root, event.y_root)
 
         self.apply_color(hex_color)
+        self.sync_picker_from_hex(hex_color)
         self.overlay.destroy()
 
 
     def cancel_eyedropper(self, event=None):
 
         self.overlay.destroy()
+
 
     # ======================================
     # コピー処理
@@ -534,6 +637,7 @@ class App(ctk.CTk):
         self.clipboard_append(value)
         self.update()
 
+
     # ======================================
     # カラーコード反映
     # ======================================
@@ -545,7 +649,7 @@ class App(ctk.CTk):
         self.hex_entry.insert(0, hex_color)
 
         self.color_preview.configure(fg_color=hex_color)
-
+        self. update_preview_border(hex_color)
 
     def on_hex_entry_enter(self, event=None):
 
@@ -558,11 +662,241 @@ class App(ctk.CTk):
         if len(value) == 7:
             try:
                 int(value[1:], 16)
-                self.apply_color(value)
+                self. apply_color(value)
+                self. sync_picker_from_hex(value)
             except ValueError:
                 print("無効なカラーコードです")
         else:
             print("無効なカラーコードです")
+
+
+    # ======================================
+    # 色プレビュー：白い時だけ縁をつける
+    # ======================================
+    def update_preview_border(self, hex_color):
+
+        if hex_color.lower() == "#ffffff":
+            self.color_preview.configure(border_width=1, border_color="black")
+        else:
+            self.color_preview.configure(border_width=0)
+
+
+    # ======================================
+    # カラーピッカー：リング画像の生成
+    # ======================================
+    def build_color_wheel_image(self, size=190, thickness=22):
+
+        image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        cx = cy = size / 2
+        outer_r = size / 2
+        inner_r = outer_r - thickness
+
+        for y in range(size):
+            for x in range(size):
+                dx = x - cx
+                dy = y - cy
+                r = math.hypot(dx, dy)
+
+                if inner_r <= r <= outer_r:
+                    angle_cw = math.degrees(math.atan2(dx, -dy)) % 360
+                    hue = (1 - angle_cw / 360) % 1
+
+                    red, green, blue = colorsys.hsv_to_rgb(hue, 1, 1)
+
+                    image.putpixel(
+                        (x, y),
+                        (int(red * 255), int(green * 255), int(blue * 255), 255)
+                    )
+
+        return image
+
+
+    # ======================================
+    # カラーピッカー：四角（彩度・明度）画像の生成
+    # ======================================
+    def build_sv_square_image(self, hue, size=90):
+
+        image = Image.new("RGB", (size, size))
+
+        for y in range(size):
+            value = 1 - (y / (size - 1))
+
+            for x in range(size):
+                sat = x / (size - 1)
+
+                red, green, blue = colorsys.hsv_to_rgb(hue, sat, value)
+
+                image.putpixel(
+                    (x, y),
+                    (int(red * 255), int(green * 255), int(blue * 255))
+                )
+
+        return image
+
+
+    # ======================================
+    # カラーピッカー：四角を描き直す（色相が変わった時）
+    # ======================================
+    def draw_sv_square(self):
+
+        square_img = self.build_sv_square_image(self.current_hue, self.square_size)
+        self.square_photo = ImageTk.PhotoImage(square_img)
+
+        center = self.wheel_size / 2
+
+        if self.square_image_id is None:
+            self.square_image_id = self.wheel_canvas.create_image(
+                center, center,
+                image=self.square_photo,
+                anchor="center"
+            )
+        else:
+            self.wheel_canvas.itemconfig(self.square_image_id, image=self.square_photo)
+
+
+    # ======================================
+    # カラーピッカー：クリック処理
+    # ======================================
+    def on_wheel_click(self, event):
+
+        cx = cy = self.wheel_size / 2
+        dx = event.x - cx
+        dy = event.y - cy
+        r = math.hypot(dx, dy)
+
+        outer_r = self.wheel_size / 2
+        inner_r = outer_r - self.wheel_thickness
+
+        if inner_r <= r <= outer_r:
+            # リング部分：色相を変更
+            angle_cw = math.degrees(math.atan2(dx, -dy)) % 360
+            self.current_hue = (1 - angle_cw / 360) % 1
+
+            self.draw_sv_square()
+            self.update_color_from_hsv()
+
+        elif r < inner_r:
+            # 四角部分：彩度・明度を変更
+            half = self.square_size / 2
+
+            local_x = dx + half
+            local_y = dy + half
+
+            local_x = max(0, min(self.square_size - 1, local_x))
+            local_y = max(0, min(self.square_size - 1, local_y))
+
+            self.current_sat = local_x / (self.square_size - 1)
+            self.current_val = 1 - (local_y / (self.square_size - 1))
+
+            self.update_color_from_hsv()
+
+        self.update_indicators()
+
+
+    # ======================================
+    # カラーピッカー：選択位置に白丸を表示
+    # ======================================
+    def update_indicators(self):
+
+        cx = cy = self.wheel_size / 2
+
+        # --- リング側の白丸 ---
+        outer_r = self.wheel_size / 2
+        inner_r = outer_r - self.wheel_thickness
+        mid_r = (inner_r + outer_r) / 2
+
+        angle_cw = (1 - self.current_hue) * 360
+        rad = math.radians(angle_cw)
+
+        ring_x = cx + mid_r * math.sin(rad)
+        ring_y = cy - mid_r * math.cos(rad)
+
+        ring_radius = 6
+
+        if self.ring_indicator_id is None:
+            self.ring_indicator_id = self.wheel_canvas.create_oval(
+                ring_x - ring_radius, ring_y - ring_radius,
+                ring_x + ring_radius, ring_y + ring_radius,
+                outline="white", width=2
+            )
+        else:
+            self.wheel_canvas.coords(
+                self.ring_indicator_id,
+                ring_x - ring_radius, ring_y - ring_radius,
+                ring_x + ring_radius, ring_y + ring_radius
+            )
+            self.wheel_canvas.tag_raise(self.ring_indicator_id)
+
+        # --- 四角側の白丸 ---
+        half = self.square_size / 2
+
+        local_x = self.current_sat * (self.square_size - 1)
+        local_y = (1 - self.current_val) * (self.square_size - 1)
+
+        square_x = cx - half + local_x
+        square_y = cy - half + local_y
+
+        square_radius = 5
+
+        if self.square_indicator_id is None:
+            self.square_indicator_id = self.wheel_canvas.create_oval(
+                square_x - square_radius, square_y - square_radius,
+                square_x + square_radius, square_y + square_radius,
+                outline="white", width=2
+            )
+        else:
+            self.wheel_canvas.coords(
+                self.square_indicator_id,
+                square_x - square_radius, square_y - square_radius,
+                square_x + square_radius, square_y + square_radius
+            )
+            self.wheel_canvas.tag_raise(self.square_indicator_id)
+
+
+    # ======================================
+    # HEX → HSV 変換
+    # ======================================
+    def hex_to_hsv(self, hex_color):
+
+        hex_color = hex_color.lstrip("#")
+        r = int(hex_color[0:2], 16) / 255
+        g = int(hex_color[2:4], 16) / 255
+        b = int(hex_color[4:6], 16) / 255
+
+        return colorsys.rgb_to_hsv(r, g, b)
+
+
+    # ======================================
+    # HEXの色にピッカーの丸を同期させる
+    # ======================================
+    def sync_picker_from_hex(self, hex_color):
+
+        h, s, v = self.hex_to_hsv(hex_color)
+
+        self.current_hue = h
+        self.current_sat = s
+        self.current_val = v
+
+        self.draw_sv_square()
+        self.update_indicators()
+
+
+    # ======================================
+    # カラーピッカー：HSVから最終カラーを反映
+    # ======================================
+    def update_color_from_hsv(self):
+
+        red, green, blue = colorsys.hsv_to_rgb(
+            self.current_hue,
+            self.current_sat,
+            self.current_val
+        )
+
+        hex_color = "#{:02x}{:02x}{:02x}".format(
+            int(red * 255), int(green * 255), int(blue * 255)
+        )
+
+        self.apply_color(hex_color)
 
 
     # ======================================
@@ -578,6 +912,24 @@ class App(ctk.CTk):
 
         spacer.pack()
 
+
+    # ======================================
+    # 工事中画像の読み込み
+    # ======================================
+    def load_preparation_image(self):
+
+        image = Image.open("images/preparation.png")
+        image = image.resize((380, 600))
+
+        return ctk.CTkImage(
+            light_image=image,
+            dark_image=image,
+            size=(380, 600)
+        )
+
+
+
+#=============クラス直下（__init__の外）のものはここまで
 
 
     # ======================================
