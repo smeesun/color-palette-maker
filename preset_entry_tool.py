@@ -58,99 +58,128 @@ class ToolTip:
 
 
 # ======================================
-# タググループ(既存選択肢＋その他＋新規追加)
+# タググループ(既存選択肢＋その他＋新規追加、新規分は4個ごとに折り返す)
 # ======================================
 class TagGroup:
 
     def __init__(self, parent, title, options, font_name = "ふてほど丸ゴシック"):
 
-        self. selected = None
+        self. selected = []
         self. buttons = {}
         self. font_name = font_name
 
         ctk. CTkLabel(
             parent,
             text = f"-{title}-",
-            font = (font_name, 16, "bold"),
+            font = (font_name, 14, "bold"),
             text_color = "#555555"
-        ). pack(anchor = "w", padx = 15, pady = (15, 5))
+        ). pack(anchor = "w", padx = 15, pady = (6, 2))
 
-        self. row = ctk. CTkFrame(parent, fg_color = "transparent")
-        self. row. pack(anchor = "w", padx = 15, pady = (0, 5))
+        # ------------------------------------
+        # 1段目：既存の選択肢＋その他＋新規入力欄(常に折り返さない)
+        # ------------------------------------
+        self. header_row = ctk. CTkFrame(parent, fg_color = "transparent")
+        self. header_row. pack(anchor = "w", padx = 15, pady = (0, 2))
 
-        # 既存の選択肢を先に並べる
         for option in options:
-            self. add_option_button(option)
+            self. add_button(self. header_row, option)
 
         # 「その他」固定ボタン
         self. other_btn = ctk. CTkButton(
-            self. row,
+            self. header_row,
             text = "その他",
-            width = 70,
+            width = 56,
+            height = 26,
             corner_radius = 50,
             fg_color = "#e6a5f8",
             hover_color = "#866091",
             text_color = "white",
-            font = (font_name, 14),
+            font = (font_name, 12),
             command = lambda: self. select("その他")
         )
-        self. other_btn. pack(side = "left", padx = 5)
+        self. other_btn. pack(side = "left", padx = 4)
         self. buttons["その他"] = self. other_btn
 
         # 「新規」入力欄(常に一番右端)
         self. new_entry = ctk. CTkEntry(
-            self. row,
-            width = 70,
+            self. header_row,
+            width = 56,
+            height = 26,
             placeholder_text = "新規",
             placeholder_text_color = "#dddddd"
         )
-        self. new_entry. pack(side = "left", padx = 5)
+        self. new_entry. pack(side = "left", padx = 4)
+
+        # ------------------------------------
+        # 2段目以降：新規タグ専用エリア(4個ごとに折り返す)
+        # ------------------------------------
+        self. new_tags_area = ctk. CTkFrame(parent, fg_color = "transparent", height = 150)
+        self. new_tags_area. pack(anchor = "w", padx = 15, pady = (0, 2))
+
+        self. new_tag_count = 0
+        self. current_new_row = None
 
 
     # ======================================
-    # 選択肢ボタンを1つ追加する(「その他」より前に挿入)
+    # ボタンを1つ作って、指定した行(parent_row)に配置する
     # ======================================
-    def add_option_button(self, option):
+    def add_button(self, parent_row, text):
 
         btn = ctk. CTkButton(
-            self. row,
-            text = option,
-            width = 70,
+            parent_row,
+            text = text,
+            width = 56,
+            height = 26,
             corner_radius = 50,
             fg_color = "#e6a5f8",
             hover_color = "#866091",
             text_color = "white",
-            font = (self. font_name, 14),
-            command = lambda o = option: self. select(o)
+            font = (self. font_name, 12),
+            command = lambda o = text: self. select(o)
         )
+        btn. pack(side = "left", padx = 4)
 
-        if hasattr(self, "other_btn"):
-            btn. pack(side = "left", padx = 5, before = self. other_btn)
-        else:
-            btn. pack(side = "left", padx = 5)
+        self. buttons[text] = btn
 
-        self. buttons[option] = btn
+        return btn
+
+
+    # ======================================
+    # 新規タグを1つ追加する(4個たまるごとに新しい行を作る)
+    # ======================================
+    def add_new_tag_button(self, text):
+
+        if self. new_tag_count % 4 == 0:
+            self. current_new_row = ctk. CTkFrame(self. new_tags_area, fg_color = "transparent")
+            self. current_new_row. pack(anchor = "w", pady = (0, 2))
+
+        self. add_button(self. current_new_row, text)
+        self. new_tag_count += 1
 
 
     def select(self, option):
 
-        if self. selected == option:
-            return
+        if self. selected is None:
+            self. selected = []
 
-        if self. selected is not None:
-            self. buttons[self. selected]. configure(
+        if option in self. selected:
+            # すでに選ばれていれば解除
+            self. selected. remove(option)
+
+            self. buttons[option]. configure(
                 fg_color = "#e6a5f8",
                 hover_color = "#866091",
                 text_color = "white"
             )
+        else:
+            # 選ばれていなければ追加
+            self. selected. append(option)
 
-        self. selected = option
-
-        self. buttons[option]. configure(
-            fg_color = "#ff6f9f",
-            hover_color = "#ff6f9f",
-            text_color = "white"
-        )
+            self. buttons[option]. configure(
+                fg_color = "#ff6f9f",
+                hover_color = "#ff6f9f",
+                text_color = "white"
+            )
 
 
     def reset(self):
@@ -162,13 +191,12 @@ class TagGroup:
                 text_color = "white"
             )
 
-        self. selected = None
+        self. selected = []
         self. new_entry. delete(0, "end")
 
 
     # ======================================
-    # 「新規」欄に入力があればボタン化して選択状態にする
-    # 戻り値: このグループで実際に使うタグ名
+    # 「新規」欄に入力があればボタン化して選択状態に追加する
     # ======================================
     def apply_new_tag_if_any(self):
 
@@ -176,11 +204,20 @@ class TagGroup:
 
         if new_text:
             if new_text not in self. buttons:
-                self. add_option_button(new_text)
+                self. add_new_tag_button(new_text)
 
-            self. select(new_text)
+            if self. selected is None:
+                self. selected = []
 
-        return self. selected
+            if new_text not in self. selected:
+                self. selected. append(new_text)
+                self. buttons[new_text]. configure(
+                    fg_color = "#ff6f9f",
+                    hover_color = "#ff6f9f",
+                    text_color = "white"
+                )
+
+        return self. selected if self. selected else []
 
 
 # ======================================
@@ -191,7 +228,7 @@ class DataEntryApp(ctk. CTk):
     def __init__(self):
         super(). __init__()
 
-        self. geometry("420x750")
+        self. geometry("550x950")
         self. title("COLpama データ登録ツール")
         self. configure(fg_color = "#3b1d35")
 
@@ -228,20 +265,20 @@ class DataEntryApp(ctk. CTk):
         self. count_label = ctk. CTkLabel(
             self. scroll,
             text = f"登録済み: {self. registered_count}件",
-            font = ("ふてほど丸ゴシック", 14),
+            font = ("ふてほど丸ゴシック", 12),
             text_color = "#555555"
         )
-        self. count_label. pack(pady = (0, 10))
+        self. count_label. pack(pady = (0, 6))
 
         # 名前欄
         ctk. CTkLabel(
             self. scroll,
             text = "名前",
-            font = ("ふてほど丸ゴシック", 14)
+            font = ("ふてほど丸ゴシック", 12)
         ). pack(anchor = "w", padx = 10)
 
-        self. name_entry = ctk. CTkEntry(self. scroll, width = 200, placeholder_text = "NoTitle")
-        self. name_entry. pack(anchor = "w", padx = 10, pady = (0, 15))
+        self. name_entry = ctk. CTkEntry(self. scroll, width = 180, height = 26, placeholder_text = "NoTitle")
+        self. name_entry. pack(anchor = "w", padx = 10, pady = (0, 8))
 
         # 3色分の入力欄(ベース/アクセント/サブ)
         self. color_widgets = {}
@@ -259,15 +296,16 @@ class DataEntryApp(ctk. CTk):
         self. register_btn = ctk. CTkButton(
             self. scroll,
             text = "この配色を登録",
-            width = 200,
+            width = 180,
+            height = 34,
             corner_radius = 50,
             fg_color = "#ff6f6f",
             hover_color = "#e35555",
             text_color = "white",
-            font = ("ふてほど丸ゴシック", 16, "bold"),
+            font = ("ふてほど丸ゴシック", 14, "bold"),
             command = self. register_entry
         )
-        self. register_btn. pack(pady = 20)
+        self. register_btn. pack(pady = 12)
 
 
     # ======================================
@@ -303,56 +341,57 @@ class DataEntryApp(ctk. CTk):
     def build_color_row(self, key, label_text, default_pct):
 
         row = ctk. CTkFrame(self. scroll, fg_color = "transparent")
-        row. pack(fill = "x", padx = 10, pady = 5)
+        row. pack(fill = "x", padx = 10, pady = 3)
 
         ctk. CTkLabel(
             row,
             text = label_text,
-            width = 60,
-            font = ("ふてほど丸ゴシック", 14),
+            width = 50,
+            font = ("ふてほど丸ゴシック", 12),
             text_color = "#555555"
         ). pack(side = "left")
 
         eyedropper_btn = ctk. CTkButton(
             row,
             text = "💉",
-            width = 36,
+            width = 30,
+            height = 26,
             corner_radius = 50,
             fg_color = "#e6a5f8",
             hover_color = "#866091",
             text_color = "white",
             command = lambda k = key: self. start_eyedropper(k)
         )
-        eyedropper_btn. pack(side = "left", padx = 5)
+        eyedropper_btn. pack(side = "left", padx = 4)
 
         ToolTip(eyedropper_btn, "スポイト")
 
-        hex_entry = ctk. CTkEntry(row, width = 90, placeholder_text = "#FFFFFF")
-        hex_entry. pack(side = "left", padx = 5)
+        hex_entry = ctk. CTkEntry(row, width = 80, height = 26, placeholder_text = "#FFFFFF")
+        hex_entry. pack(side = "left", padx = 4)
         hex_entry. bind("<Return>", lambda e, k = key: self. on_hex_entry_enter(k))
 
         preview = ctk. CTkLabel(
             row,
             text = "",
-            width = 30,
-            height = 30,
+            width = 26,
+            height = 26,
             corner_radius = 6,
             fg_color = "#FFFFFF"
         )
-        preview. pack(side = "left", padx = 5)
+        preview. pack(side = "left", padx = 4)
 
         # 既定の比率(コード欄のすぐ右隣に表示、固定値)
         ctk. CTkLabel(
             row,
             text = f"{default_pct}%",
-            width = 40,
-            font = ("ふてほど丸ゴシック", 13),
+            width = 35,
+            font = ("ふてほど丸ゴシック", 11),
             text_color = "#555555"
-        ). pack(side = "left", padx = 5)
+        ). pack(side = "left", padx = 4)
 
         # 手打ちで上書きしたい時だけ使う欄(一番右端、優先される)
-        override_entry = ctk. CTkEntry(row, width = 50, placeholder_text = "%指定")
-        override_entry. pack(side = "left", padx = 5)
+        override_entry = ctk. CTkEntry(row, width = 45, height = 26, placeholder_text = "%指定")
+        override_entry. pack(side = "left", padx = 4)
 
         self. color_widgets[key] = {
             "hex_entry": hex_entry,
@@ -456,11 +495,12 @@ class DataEntryApp(ctk. CTk):
         sub_pct = self. get_pct("sub")
 
         # 新規タグがあればボタン化してから、実際に使うタグ名を取得
-        tone_tag = self. tone_group. apply_new_tag_if_any()
-        era_tag = self. era_group. apply_new_tag_if_any()
-        season_tag = self. season_group. apply_new_tag_if_any()
+        tone_tags = self. tone_group. apply_new_tag_if_any()
+        era_tags = self. era_group. apply_new_tag_if_any()
+        season_tags = self. season_group. apply_new_tag_if_any()
 
-        tags = ",". join(filter(None, [tone_tag, era_tag, season_tag]))
+        all_tags = tone_tags + era_tags + season_tags
+        tags = ",". join(all_tags)
 
         self. cursor. execute("""
             INSERT INTO presets (name, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct, tags)
