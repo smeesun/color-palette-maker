@@ -1,5 +1,6 @@
 import customtkinter as ctk
 import tkinter as tk
+from tkinter import filedialog
 from PIL import Image, ImageGrab, ImageTk
 import colorsys
 import math
@@ -93,38 +94,45 @@ class SingleSelectGroup:
 
             self. buttons[option] = btn
 
-
     def select(self, option):
 
+        # すでに選ばれているボタンをもう一度押しても何もしない
         if self. selected == option:
-            # 同じボタンをもう一度押すと選択解除
-            self. selected = None
+            return
 
-            for btn in self. buttons. values():
-                btn. configure(
-                    fg_color = "#e6a5f8",
-                    hover_color = "#866091",
-                    text_color = "white",
-                    state = "normal"
-                )
-        else:
-            self. selected = option
+        # 前に選ばれていたボタンがあれば、普通の紫に戻す
+        if self. selected is not None:
+            self. buttons[self. selected]. configure(
+                fg_color = "#e6a5f8",
+                hover_color = "#866091",
+                text_color = "white"
+            )
 
-            for text, btn in self. buttons. items():
-                if text == option:
-                    btn. configure(
-                        fg_color = "#ff6f9f",
-                        hover_color = "#ff6f9f",
-                        text_color = "white",
-                        state = "normal"
-                    )
-                else:
-                    btn. configure(
-                        fg_color = "#dddddd",
-                        hover_color = "#dddddd",
-                        text_color = "#999999",
-                        state = "disabled"
-                    )
+        # 今回選ばれたボタンをピンクにする
+        self. selected = option
+
+        self. buttons[option]. configure(
+
+            fg_color = "#ff6f9f",
+            hover_color = "#ff6f9f",
+            text_color = "white",
+
+        )
+
+    # ======================================
+    # グループを初期状態(未選択)に戻す
+    # ======================================
+    def reset(self):
+
+        for btn in self. buttons. values():
+            btn. configure(
+                fg_color = "#e6a5f8",
+                hover_color = "#866091",
+                text_color = "white"
+            )
+
+        self. selected = None
+    
 
 
 # ======================================
@@ -606,15 +614,59 @@ class App(ctk. CTk):
         self. section_line(self. preset_frame)
 
 
-        # 工事中画像差し込み
-        ctk. CTkLabel(
+# ======================================
+# プリセット機能
+# ====================================== 
+        # 仮の3色(ダミー、後で実際のGO!ボタンの結果に差し替え予定)
+        self. dummy_palette = ["#ff6f9f", "#a5e6f8", "#e6a5f8"]
+
+        # 6枠分のデータ(colorsがNoneのうちは「まだ登録されていない」枠)
+        self. preset_data = [
+            {"colors": None, "name": ""} for _ in range(6)
+        ]
+
+        self. current_preset_page = 0
+
+        # タブ(1〜6)の行
+        self. preset_tab_buttons = []
+
+        preset_tab_row = ctk. CTkFrame(
             self. preset_frame,
-            text = "",
-            image = self. prep_image
-        ). pack(pady = 10)
+            fg_color = "transparent"
+        )
+        preset_tab_row. pack(fill = "x", padx = 15, pady = (10, 0))
+
+        for i in range(6):
+            tab_btn = ctk. CTkButton(
+                preset_tab_row,
+                text = str(i + 1),
+                width = 40,
+                corner_radius = 0,
+                fg_color = "white",
+                hover_color = "#f0d9f5",
+                text_color = "#555555",
+                border_width = 1,
+                border_color = "#d0d0d0",
+                command = lambda i = i: self. switch_preset_page(i)
+            )
+            tab_btn. pack(side = "left")
+
+            self. preset_tab_buttons. append(tab_btn)
+
+        # ページの中身を入れる箱(タブを押すたびにこの中を描き直す)
+        self. preset_content_frame = ctk. CTkFrame(
+            self. preset_frame,
+            fg_color = "white",
+            border_width = 1,
+            border_color = "#d0d0d0"
+        )
+        self. preset_content_frame. pack(fill = "x", padx = 15, pady = (0, 15))
+
+        # 初期表示(1ページ目)
+        self. switch_preset_page(0)
+
 
         self. space()
-
 
 
         # ======================================
@@ -752,6 +804,15 @@ class App(ctk. CTk):
         self. clipboard_append(value)
         self. update()
 
+
+    # ======================================
+    # プリセット：色ごとのコピー処理
+    # ======================================
+    def copy_preset_color(self, color):
+
+        self. clipboard_clear()
+        self. clipboard_append(color)
+        self. update()
 
     # ======================================
     # カラーコード反映
@@ -1051,6 +1112,15 @@ class App(ctk. CTk):
 
 
     # ======================================
+    # セレクトの色を初期状態(白)に戻す
+    # ======================================
+    def reset_select(self):
+
+        self. apply_color("#FFFFFF")
+        self. sync_picker_from_hex("#FFFFFF")
+
+
+    # ======================================
     # 「このチョイスで調べる」ボタンの処理（仮）
     # ======================================
     def on_category_go(self):
@@ -1058,6 +1128,215 @@ class App(ctk. CTk):
         print("トーン:", self.tone_group.selected)
         print("年代:", self.era_group.selected)
         print("季節:", self.season_group.selected)
+
+
+    # ======================================
+    # プリセット：表示するページを切り替える
+    # ======================================
+    def switch_preset_page(self, index):
+
+        self. current_preset_page = index
+
+        # タブの見た目を更新(選択中だけ可愛い色、他は白)
+        for i, btn in enumerate(self. preset_tab_buttons):
+            if i == index:
+                btn. configure(fg_color = "#ff9fd0", text_color = "white")
+            else:
+                btn. configure(fg_color = "white", text_color = "#555555")
+
+        self. render_preset_page()
+
+
+    # ======================================
+    # プリセット：現在のページの中身を描き直す
+    # ======================================
+    def render_preset_page(self):
+
+        for widget in self. preset_content_frame. winfo_children():
+            widget. destroy()
+
+        data = self. preset_data[self. current_preset_page]
+
+        # 登録済みならその色、まだなら仮の3色(候補)を表示
+        colors = data["colors"] if data["colors"] is not None else self. dummy_palette
+
+        # ------------------------------------
+        # 上段：📷 スクショボタン ＋ 🗑️ 削除ボタン(右寄せ)
+        # ------------------------------------
+        top_row = ctk. CTkFrame(self. preset_content_frame, fg_color = "transparent")
+        top_row. pack(fill = "x", padx = 10, pady = (10, 0))
+
+        delete_btn = ctk. CTkButton(
+            top_row,
+            text = "🗑",
+            width = 40,
+            height = 32,
+            corner_radius = 50,
+            fg_color = "#dddddd",
+            hover_color = "#cccccc",
+            text_color = "black",
+            anchor = "center",
+            command = self. delete_current_preset
+        )
+        delete_btn. pack(side = "right", padx = (5, 0))
+
+        ToolTip(delete_btn, "削除")
+
+        camera_btn = ctk. CTkButton(
+            top_row,
+            text = "📷",
+            width = 40,
+            height = 32,
+            corner_radius = 50,
+            fg_color = "#dddddd",
+            hover_color = "#cccccc",
+            text_color = "black",
+            anchor = "center",
+            command = self. screenshot_current_preset
+        )
+        camera_btn. pack(side = "right")
+
+        ToolTip(camera_btn, "スクショを撮る")
+
+        # ------------------------------------
+        # 名前欄 ＋ ✏️ 登録ボタン
+        # ------------------------------------
+        name_row = ctk. CTkFrame(self. preset_content_frame, fg_color = "transparent")
+        name_row. pack(fill = "x", padx = 10, pady = (5, 10))
+
+        ctk. CTkLabel(
+            name_row,
+            text = "名前",
+            font = ("ふてほど丸ゴシック", 14),
+            text_color = "#555555"
+        ). pack(side = "left", padx = (0, 5))
+
+        self. preset_name_entry = ctk. CTkEntry(
+            name_row,
+            width = 150,
+            placeholder_text = "NoTitle",
+            placeholder_text_color = "#dddddd"
+        )
+        self. preset_name_entry. pack(side = "left")
+
+        if data["name"]:
+            self. preset_name_entry. insert(0, data["name"])
+
+        register_btn = ctk. CTkButton(
+            name_row,
+            text = "✏",
+            width = 20,
+            height = 28,
+            corner_radius = 50,
+            fg_color = "#e6a5f8",
+            hover_color = "#866091",
+            text_color = "white",
+            anchor = "center",
+            command = self. register_current_preset
+        )
+        register_btn. pack(side = "left", padx = (5, 0))
+
+        ToolTip(register_btn, "名前を登録")
+
+        # ------------------------------------
+        # 3色スウォッチ
+        # ------------------------------------
+        self. preset_swatch_row = ctk. CTkFrame(self. preset_content_frame, fg_color = "transparent")
+        self. preset_swatch_row. pack(pady = (5, 5))
+
+        for color in colors:
+            ctk. CTkLabel(
+                self. preset_swatch_row,
+                text = "",
+                width = 80,
+                height = 80,
+                corner_radius = 8,
+                fg_color = color
+            ). pack(side = "left", padx = 5)
+
+        # ------------------------------------
+        # カラーコード表示 ＋ コピーボタン(色ごとに1組)
+        # ------------------------------------
+        code_row = ctk. CTkFrame(self. preset_content_frame, fg_color = "transparent")
+        code_row. pack(pady = (0, 10))
+
+        for color in colors:
+            code_col = ctk. CTkFrame(code_row, width = 80, height = 30, fg_color = "transparent")
+            code_col. pack_propagate(False)
+            code_col. pack(side = "left", padx = 5)
+
+            inner = ctk. CTkFrame(code_col, fg_color = "transparent")
+            inner. pack(expand = True)
+
+            ctk. CTkLabel(
+                inner,
+                text = color. upper(),
+                font = ("ふてほど丸ゴシック", 11),
+                text_color = "#555555"
+            ). pack(side = "left")
+
+            copy_btn = ctk. CTkButton(
+                inner,
+                text = "📝",
+                width = 24,
+                height = 24,
+                corner_radius = 50,
+                fg_color = "#e6a5f8",
+                hover_color = "#866091",
+                text_color = "white",
+                command = lambda c = color. upper(): self. copy_preset_color(c)
+            )
+            copy_btn. pack(side = "left", padx = (3, 0))
+
+            ToolTip(copy_btn, "コピーする")
+
+
+    # ======================================
+    # プリセット：名前と(仮の)3色を現在のページに登録する
+    # ======================================
+    def register_current_preset(self):
+
+        name = self. preset_name_entry. get(). strip()
+
+        self. preset_data[self. current_preset_page] = {
+            "colors": list(self. dummy_palette),
+            "name": name
+        }
+
+        self. render_preset_page()
+
+
+    # ======================================
+    # プリセット：現在のページを削除(未登録状態に戻す)
+    # ======================================
+    def delete_current_preset(self):
+
+        self. preset_data[self. current_preset_page] = {"colors": None, "name": ""}
+        self. render_preset_page()
+
+
+    # ======================================
+    # プリセット：現在の3色をスクリーンショットして保存
+    # ======================================
+    def screenshot_current_preset(self):
+
+        self. update()
+
+        x = self. preset_swatch_row. winfo_rootx()
+        y = self. preset_swatch_row. winfo_rooty()
+        w = self. preset_swatch_row. winfo_width()
+        h = self. preset_swatch_row. winfo_height()
+
+        screenshot = ImageGrab. grab(bbox = (x, y, x + w, y + h), all_screens = True)
+
+        file_path = filedialog. asksaveasfilename(
+            defaultextension = ".png",
+            filetypes = [("PNG画像", "*.png")],
+            initialfile = "palette.png"
+        )
+
+        if file_path:
+            screenshot. save(file_path)
 
 
     # ======================================
@@ -1099,6 +1378,11 @@ class App(ctk. CTk):
 
         self. scroll. _parent_canvas. yview_moveto(0)
 
+        #ホームボタン押すと全部リセットする
+        self. reset_select()
+        self. tone_group. reset()
+        self. era_group. reset()
+        self. season_group. reset()
 
 
     # ======================================
