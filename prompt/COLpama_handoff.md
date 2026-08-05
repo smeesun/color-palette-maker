@@ -1,11 +1,53 @@
+# COLpama 開発引き継ぎドキュメント
+
+## 1. プロジェクト概要と目的
+
+**COLpama(カラパマ)** は、3DCG・イラスト制作者向けのカラーパレットメーカーアプリ。
+
+制作活動において「作品の配色を決める際にどの色を組み合わせるか迷う」という課題を解決するための配色支援ツールとして開発中。
+
+**コンセプトの核心**: セレクト/カテゴリ/ラッキーカラーの各セクションにある「GO!」ボタンは、最終的に SQLite に事前登録された300〜500件の配色データ(ベース・アクセント・サブの3色+タグ)の中から、ユーザーが指定した条件に合う3色を**検索・提案**する仕組みになる予定。ユーザーがアプリ上で配色データを1件ずつ手動登録していくものではなく、あらかじめ用意された配色ライブラリから「おすすめの3色」をピックして見せる、という設計思想。
+
+この300〜500件のライブラリデータを効率よく登録するために、COLpama本体とは別に「データ登録専用ツール」(`preset_entry_tool.py`)を並行して開発している。
+
+## 2. 使用技術スタック
+
+- **言語**: Python
+- **GUIフレームワーク**: `customtkinter`(ctk)
+- **画像処理**: `Pillow`(`PIL.Image`, `PIL.ImageGrab`, `PIL.ImageTk`)
+- **色変換**: 標準ライブラリ `colorsys`, `math`
+- **データベース**: 標準ライブラリ `sqlite3`(ファイル名 `colpama.db`)
+- **その他標準ライブラリ**: `tkinter`(`tk`, `filedialog`)
+
+追加インストールが必要なのは `customtkinter` と `Pillow` のみ。`sqlite3` は標準ライブラリのため追加インストール不要。
+
+## 3. フォルダ構成・主要ファイル
+
+```
+Color Palette Maker/
+├── TEST03.PY              ← COLpama本体(GUIアプリ)
+├── preset_entry_tool.py   ← データ登録専用ツール(GUIアプリ)
+├── colpama.db             ← SQLiteデータベース(両ファイルから共有・相対パス参照)
+├── images/
+│   ├── COLpama_top.png    ← トップ画像(380x260にリサイズして使用)
+│   └── preparation.png    ← 工事中画像(998x1575の元画像を380x600にリサイズして使用)
+```
+
+**重要**: `preset_entry_tool.py` は `TEST03.PY` と**同じ階層**に置く必要がある。`sqlite3.connect("colpama.db")` が相対パスで呼ばれているため、実行時のカレントディレクトリを基準に `colpama.db` を探すことになり、サブフォルダに分けるとパス指定を書き換える必要が出てくるため。
+
+GitHubにこのフォルダ自体をリポジトリのルートとして同期する方針。
+
+## 4. 最新のソースコード
+
+### 4-1. TEST03.PY(COLpama本体)
+
+```python
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import filedialog
 from PIL import Image, ImageGrab, ImageTk
 import colorsys
 import math
-import sqlite3
-import random
 
 
 # ======================================
@@ -65,13 +107,10 @@ class ToolTip:
 # ======================================
 class SingleSelectGroup:
 
-    def __init__(self, parent, title, options, font_name="ふてほど丸ゴシック", on_change=None):
+    def __init__(self, parent, title, options, font_name="ふてほど丸ゴシック"):
 
         self. selected = None
         self. buttons = {}
-        self. disabled_options = set()
-        self. on_change = on_change
-        self. font_name = font_name
 
         ctk. CTkLabel(
             parent,
@@ -87,62 +126,19 @@ class SingleSelectGroup:
             btn = ctk. CTkButton(
                 row,
                 text = option,
-                width = 58,
+                width = 70,
                 corner_radius = 50,
                 fg_color = "#e6a5f8",
                 hover_color = "#866091",
                 text_color = "white",
-                font = (font_name, 13),
+                font = (font_name, 14),
                 command = lambda o = option: self. select(o)
             )
-            btn. pack(side = "left", padx = 3)
+            btn. pack(side = "left", padx = 5)
 
             self. buttons[option] = btn
 
-        # ------------------------------------
-        # データ登録ツール側で追加されたカスタムタグ専用エリア(4個ごとに折り返す)
-        # ------------------------------------
-        self. extra_area = ctk. CTkFrame(parent, fg_color = "transparent")
-        self. extra_area. pack(anchor = "w", padx = 15, pady = (0, 5))
-
-        self. extra_count = 0
-        self. current_extra_row = None
-
-
-    # ======================================
-    # データ登録ツールで追加されたカスタムタグのボタンを1つ追加する(4個たまるごとに新しい行を作る)
-    # ======================================
-    def add_extra_option(self, text):
-
-        if text in self. buttons:
-            return
-
-        if self. extra_count % 4 == 0:
-            self. current_extra_row = ctk. CTkFrame(self. extra_area, fg_color = "transparent")
-            self. current_extra_row. pack(anchor = "w", pady = (0, 3))
-
-        btn = ctk. CTkButton(
-            self. current_extra_row,
-            text = text,
-            width = 58,
-            corner_radius = 50,
-            fg_color = "#e6a5f8",
-            hover_color = "#866091",
-            text_color = "white",
-            font = (self. font_name, 13),
-            command = lambda o = text: self. select(o)
-        )
-        btn. pack(side = "left", padx = 3)
-
-        self. buttons[text] = btn
-        self. extra_count += 1
-
-
     def select(self, option):
-
-        # グレーアウト中のボタンは押せない
-        if option in self. disabled_options:
-            return
 
         # すでに選ばれているボタンをもう一度押しても何もしない
         if self. selected == option:
@@ -167,82 +163,19 @@ class SingleSelectGroup:
 
         )
 
-        if self. on_change is not None:
-            self. on_change()
-
     # ======================================
-    # グループを初期状態(未選択・グレーアウトなし)に戻す
+    # グループを初期状態(未選択)に戻す
     # ======================================
     def reset(self):
 
         for btn in self. buttons. values():
             btn. configure(
-                state = "normal",
                 fg_color = "#e6a5f8",
                 hover_color = "#866091",
                 text_color = "white"
             )
 
         self. selected = None
-        self. disabled_options = set()
-
-
-    # ======================================
-    # 選択だけを解除する(グレーアウト状態には触れない、カテゴリ連動で使う)
-    # ======================================
-    def clear_selection(self):
-
-        if self. selected is not None:
-            prev = self. selected
-            self. selected = None
-
-            self. buttons[prev]. configure(
-                fg_color = "#e6a5f8",
-                hover_color = "#866091",
-                text_color = "white"
-            )
-
-
-    # ======================================
-    # 1つのボタンを有効／グレーアウトに切り替える(カテゴリ連動で使う)
-    # ======================================
-    def set_enabled(self, option, enabled):
-
-        if enabled:
-            self. disabled_options. discard(option)
-
-            if self. selected == option:
-                self. buttons[option]. configure(
-                    state = "normal",
-                    fg_color = "#ff6f9f",
-                    hover_color = "#ff6f9f",
-                    text_color = "white"
-                )
-            else:
-                self. buttons[option]. configure(
-                    state = "normal",
-                    fg_color = "#e6a5f8",
-                    hover_color = "#866091",
-                    text_color = "white"
-                )
-        else:
-            self. disabled_options. add(option)
-
-            self. buttons[option]. configure(
-                state = "disabled",
-                fg_color = "#dddddd",
-                hover_color = "#dddddd",
-                text_color = "#aaaaaa"
-            )
-
-
-    # ======================================
-    # グループ内の全ボタンを有効化する(絞り込み条件が無い時に使う)
-    # ======================================
-    def enable_all(self):
-
-        for option in self. buttons:
-            self. set_enabled(option, True)
     
 
 
@@ -265,13 +198,6 @@ class App(ctk. CTk):
 
         # 背景の色指定
         self. configure(fg_color = "#3b1d35")
-
-        # ======================================
-        # SQLite接続(データ登録ツールと同じcolpama.dbを参照する)
-        # カテゴリの絞り込み(グレーアウト)判定に使う
-        # ======================================
-        self. conn = sqlite3. connect("colpama.db")
-        self. cursor = self. conn. cursor()
 
 
         # ======================================
@@ -629,80 +555,6 @@ class App(ctk. CTk):
             self. on_select_go
         )
 
-        # ------------------------------------
-        # 「この色で調べる」の結果画面(普段は非表示、GO!を押した時だけ表示する)
-        # ------------------------------------
-        self. select_result_frame = ctk. CTkFrame(self, fg_color = "white")
-
-        ctk. CTkLabel(
-            self. select_result_frame,
-            text = "おすすめ3色",
-            font = ("ふてほど丸ゴシック", 22, "bold")
-        ). pack(pady = (30, 20))
-
-        circle_row = ctk. CTkFrame(self. select_result_frame, fg_color = "transparent")
-        circle_row. pack(pady = (0, 10))
-
-        self. result_circles = {}
-        self. result_hex_labels = {}
-
-        for key, label_text in (("base", "メインカラー"), ("accent", "アクセント"), ("sub", "サブ")):
-            col = ctk. CTkFrame(circle_row, fg_color = "transparent")
-            col. pack(side = "left", padx = 12)
-
-            ctk. CTkLabel(
-                col,
-                text = label_text,
-                font = ("ふてほど丸ゴシック", 11),
-                text_color = "#888888"
-            ). pack(pady = (0, 4))
-
-            circle = ctk. CTkLabel(
-                col,
-                text = "",
-                width = 90,
-                height = 90,
-                corner_radius = 45,
-                fg_color = "#FFFFFF"
-            )
-            circle. pack()
-
-            hex_label = ctk. CTkLabel(
-                col,
-                text = "#FFFFFF",
-                font = ("ふてほど丸ゴシック", 12),
-                text_color = "#555555"
-            )
-            hex_label. pack(pady = (6, 0))
-
-            self. result_circles[key] = circle
-            self. result_hex_labels[key] = hex_label
-
-        ctk. CTkLabel(
-            self. select_result_frame,
-            text = "-色の比率-",
-            font = ("ふてほど丸ゴシック", 16, "bold"),
-            text_color = "#555555"
-        ). pack(pady = (25, 10))
-
-        self. result_bar_frame = ctk. CTkFrame(self. select_result_frame, fg_color = "transparent", width = 300, height = 40)
-        self. result_bar_frame. pack_propagate(False)
-        self. result_bar_frame. pack(pady = (0, 10))
-
-        self. result_bar_segments = {}
-
-        for key in ("base", "accent", "sub"):
-            seg = ctk. CTkLabel(
-                self. result_bar_frame,
-                text = "",
-                text_color = "white",
-                font = ("ふてほど丸ゴシック", 12, "bold"),
-                fg_color = "#FFFFFF"
-            )
-            seg. pack(side = "left", fill = "y")
-
-            self. result_bar_segments[key] = seg
-
         self. space()
 
 
@@ -751,31 +603,20 @@ class App(ctk. CTk):
         self. tone_group = SingleSelectGroup(
             self. category_frame,
             title = "トーン",
-            options = ["ビビッド", "ネオン", "くすみ", "パステル", "その他"],
-            on_change = self. refresh_category_filters
+            options = ["ビビッド", "ネオン", "くすみ", "パステル"]
         )
 
         self. era_group = SingleSelectGroup(
             self. category_frame,
             title = "年代",
-            options = ["70's", "80's", "90's", "00's", "その他"],
-            on_change = self. refresh_category_filters
+            options = ["70's", "80's", "90's", "00's"]
         )
 
         self. season_group = SingleSelectGroup(
             self. category_frame,
             title = "季節",
-            options = ["春", "夏", "秋", "冬", "その他"],
-            on_change = self. refresh_category_filters
+            options = ["春", "夏", "秋", "冬"]
         )
-
-        # データ登録ツールで追加されたカスタムタグを、同じ内容で下に復元する
-        self. load_custom_category_tags(self. tone_group, "トーン")
-        self. load_custom_category_tags(self. era_group, "年代")
-        self. load_custom_category_tags(self. season_group, "季節")
-
-        # 起動直後は何も選ばれていないので、この時点では全ボタンが有効なままになる
-        self. refresh_category_filters()
 
         # ------------------------------------
         # 「このチョイスで調べる」文言＋GOボタン
@@ -908,7 +749,7 @@ class App(ctk. CTk):
 
 
         self. space()
-
+        
 
 #=============クラス直下（__init__の外）のものはここに
 
@@ -1311,107 +1152,7 @@ class App(ctk. CTk):
     # ======================================
     def on_select_go(self):
 
-        row = self. find_similar_preset(self. current_hex)
-
-        if row is None:
-            print("まだ配色データが登録されていません")
-            return
-
-        self. show_select_result(row)
-
-
-    # ======================================
-    # HEX同士の近さを距離として計算する(RGB空間でのユークリッド距離)
-    # ======================================
-    def color_distance(self, hex_a, hex_b):
-
-        ra, ga, ba = self. hex_to_rgb(hex_a)
-        rb, gb, bb = self. hex_to_rgb(hex_b)
-
-        return ((ra - rb) ** 2 + (ga - gb) ** 2 + (ba - bb) ** 2) ** 0.5
-
-
-    def hex_to_rgb(self, hex_color):
-
-        hex_color = hex_color. lstrip("#")
-
-        return (
-            int(hex_color[0:2], 16),
-            int(hex_color[2:4], 16),
-            int(hex_color[4:6], 16),
-        )
-
-
-    # ======================================
-    # 指定した色に一番近いベース色を持つ配色をcolpama.dbから探す
-    # 完全一致があればその中からランダムに1件、無ければ一番近い色の中からランダムに1件返す
-    # ======================================
-    def find_similar_preset(self, target_hex):
-
-        self. cursor. execute("""
-            SELECT id, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct
-            FROM presets
-        """)
-        rows = self. cursor. fetchall()
-
-        if not rows:
-            return None
-
-        exact_matches = [r for r in rows if r[1]. lower() == target_hex. lower()]
-
-        if exact_matches:
-            return random. choice(exact_matches)
-
-        best_distance = None
-        best_rows = []
-
-        for r in rows:
-            distance = self. color_distance(target_hex, r[1])
-
-            if best_distance is None or distance < best_distance:
-                best_distance = distance
-                best_rows = [r]
-            elif distance == best_distance:
-                best_rows. append(r)
-
-        return random. choice(best_rows)
-
-
-    # ======================================
-    # セレクトのGO!結果画面の中身を、検索結果の配色で埋める
-    # ======================================
-    def render_select_result(self, row):
-
-        _, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct = row
-
-        hexes = {"base": base_hex, "accent": accent_hex, "sub": sub_hex}
-        pcts = {"base": base_pct, "accent": accent_pct, "sub": sub_pct}
-
-        for key in ("base", "accent", "sub"):
-            self. result_circles[key]. configure(fg_color = hexes[key])
-            self. result_hex_labels[key]. configure(text = hexes[key]. upper())
-
-        total_bar_width = 300
-
-        for key in ("base", "accent", "sub"):
-            seg_width = max(1, round(total_bar_width * pcts[key] / 100))
-
-            self. result_bar_segments[key]. configure(
-                width = seg_width,
-                fg_color = hexes[key],
-                text = f"{pcts[key]}%"
-            )
-
-
-    # ======================================
-    # セレクトのGO!結果画面を表示する(普段見えているスクロール部分を隠す)
-    # ======================================
-    def show_select_result(self, row):
-
-        self. render_select_result(row)
-
-        self. scroll. pack_forget()
-        self. select_result_frame. pack(fill = "both", expand = True)
+        print(f"この色で調べる: {self. current_hex}")
 
 
     # ======================================
@@ -1421,90 +1162,6 @@ class App(ctk. CTk):
 
         self. apply_color("#FFFFFF")
         self. sync_picker_from_hex("#FFFFFF")
-
-
-    # ======================================
-    # カテゴリ：データ登録ツールで追加されたカスタムタグを、そのカテゴリの下に復元する
-    # ======================================
-    def load_custom_category_tags(self, group, group_name):
-
-        self. cursor. execute(
-            "SELECT tag FROM custom_tags WHERE group_name = ? ORDER BY id ASC",
-            (group_name,)
-        )
-
-        for (tag,) in self. cursor. fetchall():
-            group. add_extra_option(tag)
-
-
-    # ======================================
-    # カテゴリ：選んだ内容に応じて、年代・季節の選択肢を段階的に絞り込む(その他は常に選択可)
-    # 「その他」が選ばれている段は絞り込みの条件に使わない(そのカテゴリでは絞らない、という意味なので)
-    # ======================================
-    def refresh_category_filters(self):
-
-        tone_selected = self. tone_group. selected
-
-        allowed_era = self. get_allowed_tags("era_tags", tone_tag = tone_selected)
-        self. apply_category_gate(self. era_group, allowed_era)
-
-        era_selected = self. era_group. selected
-
-        allowed_season = self. get_allowed_tags("season_tags", tone_tag = tone_selected, era_tag = era_selected)
-        self. apply_category_gate(self. season_group, allowed_season)
-
-
-    # ======================================
-    # カテゴリ：colpama.dbに登録された配色から、指定した条件と一緒に登録のあるタグの集合を調べる
-    # 条件が無ければNoneを返す(絞り込みなし＝全部有効の意味)
-    # ======================================
-    def get_allowed_tags(self, target_column, tone_tag = None, era_tag = None):
-
-        conditions = []
-        params = []
-
-        if tone_tag and tone_tag != "その他":
-            conditions. append("(',' || tone_tags || ',') LIKE ?")
-            params. append(f"%,{tone_tag},%")
-
-        if era_tag and era_tag != "その他":
-            conditions. append("(',' || era_tags || ',') LIKE ?")
-            params. append(f"%,{era_tag},%")
-
-        if not conditions:
-            return None
-
-        query = f"SELECT {target_column} FROM presets WHERE " + " AND ". join(conditions)
-        self. cursor. execute(query, params)
-
-        allowed = set()
-
-        for (tags_value,) in self. cursor. fetchall():
-            for tag in (tags_value or ""). split(","):
-                tag = tag. strip()
-
-                if tag:
-                    allowed. add(tag)
-
-        return allowed
-
-
-    # ======================================
-    # カテゴリ：絞り込み結果(allowed_tags)をボタンの有効／グレーアウトに反映する
-    # allowed_tagsがNoneの時は絞り込み無し(全部有効)
-    # ======================================
-    def apply_category_gate(self, group, allowed_tags):
-
-        if allowed_tags is None:
-            group. enable_all()
-            return
-
-        for option in group. buttons:
-            enabled = (option == "その他") or (option in allowed_tags)
-            group. set_enabled(option, enabled)
-
-        if group. selected is not None and group. selected != "その他" and group. selected not in allowed_tags:
-            group. clear_selection()
 
 
     # ======================================
@@ -1763,10 +1420,6 @@ class App(ctk. CTk):
     # ======================================
     def go_home(self):
 
-        # GO!の結果画面が開いていたら閉じて、普段のスクロール画面に戻す
-        self. select_result_frame. pack_forget()
-        self. scroll. pack(fill = "both", expand = True)
-
         self. scroll. _parent_canvas. yview_moveto(0)
 
         #ホームボタン押すと全部リセットする
@@ -1813,3 +1466,585 @@ class App(ctk. CTk):
 # ======================================
 app = App()
 app. mainloop()
+```
+
+### 4-2. preset_entry_tool.py(データ登録専用ツール)
+
+```python
+import customtkinter as ctk
+import tkinter as tk
+from PIL import ImageGrab
+import sqlite3
+
+
+# ======================================
+# テーマ設定
+# ======================================
+ctk. set_appearance_mode("Light")
+ctk. set_default_color_theme("blue")
+
+
+# ======================================
+# ツールチップ(COLpama本体と同じもの)
+# ======================================
+class ToolTip:
+
+    def __init__(self, widget, text):
+        self. widget = widget
+        self. text = text
+        self. tip_window = None
+
+        widget. bind("<Enter>", self. show_tip)
+        widget. bind("<Leave>", self. hide_tip)
+
+
+    def show_tip(self, event = None):
+
+        if self. tip_window or not self. text:
+            return
+
+        x = self. widget. winfo_rootx() + 10
+        y = self. widget. winfo_rooty() + self. widget. winfo_height() + 5
+
+        self. tip_window = tw = tk. Toplevel(self. widget)
+        tw. wm_overrideredirect(True)
+        tw. wm_geometry(f"+{x}+{y}")
+
+        label = tk. Label(
+            tw,
+            text = self. text,
+            background = "#FFFFFF",
+            foreground = "black",
+            relief = "solid",
+            borderwidth = 1,
+            padx = 6,
+            pady = 2
+        )
+        label. pack()
+
+
+    def hide_tip(self, event = None):
+
+        if self. tip_window:
+            self. tip_window. destroy()
+            self. tip_window = None
+
+
+# ======================================
+# タググループ(既存選択肢＋その他＋新規追加、新規分は4個ごとに折り返す)
+# ======================================
+class TagGroup:
+
+    def __init__(self, parent, title, options, font_name = "ふてほど丸ゴシック"):
+
+        self. selected = []
+        self. buttons = {}
+        self. font_name = font_name
+
+        ctk. CTkLabel(
+            parent,
+            text = f"-{title}-",
+            font = (font_name, 14, "bold"),
+            text_color = "#555555"
+        ). pack(anchor = "w", padx = 15, pady = (6, 2))
+
+        # ------------------------------------
+        # 1段目：既存の選択肢＋その他＋新規入力欄(常に折り返さない)
+        # ------------------------------------
+        self. header_row = ctk. CTkFrame(parent, fg_color = "transparent")
+        self. header_row. pack(anchor = "w", padx = 15, pady = (0, 2))
+
+        for option in options:
+            self. add_button(self. header_row, option)
+
+        # 「その他」固定ボタン
+        self. other_btn = ctk. CTkButton(
+            self. header_row,
+            text = "その他",
+            width = 56,
+            height = 26,
+            corner_radius = 50,
+            fg_color = "#e6a5f8",
+            hover_color = "#866091",
+            text_color = "white",
+            font = (font_name, 12),
+            command = lambda: self. select("その他")
+        )
+        self. other_btn. pack(side = "left", padx = 4)
+        self. buttons["その他"] = self. other_btn
+
+        # 「新規」入力欄(常に一番右端)
+        self. new_entry = ctk. CTkEntry(
+            self. header_row,
+            width = 56,
+            height = 26,
+            placeholder_text = "新規",
+            placeholder_text_color = "#dddddd"
+        )
+        self. new_entry. pack(side = "left", padx = 4)
+
+        # ------------------------------------
+        # 2段目以降：新規タグ専用エリア(4個ごとに折り返す)
+        # ------------------------------------
+        self. new_tags_area = ctk. CTkFrame(parent, fg_color = "transparent", height = 150)
+        self. new_tags_area. pack(anchor = "w", padx = 15, pady = (0, 2))
+
+        self. new_tag_count = 0
+        self. current_new_row = None
+
+
+    # ======================================
+    # ボタンを1つ作って、指定した行(parent_row)に配置する
+    # ======================================
+    def add_button(self, parent_row, text):
+
+        btn = ctk. CTkButton(
+            parent_row,
+            text = text,
+            width = 56,
+            height = 26,
+            corner_radius = 50,
+            fg_color = "#e6a5f8",
+            hover_color = "#866091",
+            text_color = "white",
+            font = (self. font_name, 12),
+            command = lambda o = text: self. select(o)
+        )
+        btn. pack(side = "left", padx = 4)
+
+        self. buttons[text] = btn
+
+        return btn
+
+
+    # ======================================
+    # 新規タグを1つ追加する(4個たまるごとに新しい行を作る)
+    # ======================================
+    def add_new_tag_button(self, text):
+
+        if self. new_tag_count % 4 == 0:
+            self. current_new_row = ctk. CTkFrame(self. new_tags_area, fg_color = "transparent")
+            self. current_new_row. pack(anchor = "w", pady = (0, 2))
+
+        self. add_button(self. current_new_row, text)
+        self. new_tag_count += 1
+
+
+    def select(self, option):
+
+        if self. selected is None:
+            self. selected = []
+
+        if option in self. selected:
+            # すでに選ばれていれば解除
+            self. selected. remove(option)
+
+            self. buttons[option]. configure(
+                fg_color = "#e6a5f8",
+                hover_color = "#866091",
+                text_color = "white"
+            )
+        else:
+            # 選ばれていなければ追加
+            self. selected. append(option)
+
+            self. buttons[option]. configure(
+                fg_color = "#ff6f9f",
+                hover_color = "#ff6f9f",
+                text_color = "white"
+            )
+
+
+    def reset(self):
+
+        for btn in self. buttons. values():
+            btn. configure(
+                fg_color = "#e6a5f8",
+                hover_color = "#866091",
+                text_color = "white"
+            )
+
+        self. selected = []
+        self. new_entry. delete(0, "end")
+
+
+    # ======================================
+    # 「新規」欄に入力があればボタン化して選択状態に追加する
+    # ======================================
+    def apply_new_tag_if_any(self):
+
+        new_text = self. new_entry. get(). strip()
+
+        if new_text:
+            if new_text not in self. buttons:
+                self. add_new_tag_button(new_text)
+
+            if self. selected is None:
+                self. selected = []
+
+            if new_text not in self. selected:
+                self. selected. append(new_text)
+                self. buttons[new_text]. configure(
+                    fg_color = "#ff6f9f",
+                    hover_color = "#ff6f9f",
+                    text_color = "white"
+                )
+
+        return self. selected if self. selected else []
+
+
+# ======================================
+# データ登録ツール本体
+# ======================================
+class DataEntryApp(ctk. CTk):
+
+    def __init__(self):
+        super(). __init__()
+
+        self. geometry("550x950")
+        self. title("COLpama データ登録ツール")
+        self. configure(fg_color = "#3b1d35")
+
+        # ------------------------------------
+        # SQLite接続(COLpama本体と同じファイルを使う)
+        # ------------------------------------
+        self. conn = sqlite3. connect("colpama.db")
+        self. cursor = self. conn. cursor()
+
+        self. cursor. execute("""
+            CREATE TABLE IF NOT EXISTS presets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                base_hex TEXT,
+                base_pct INTEGER,
+                accent_hex TEXT,
+                accent_pct INTEGER,
+                sub_hex TEXT,
+                sub_pct INTEGER,
+                tags TEXT
+            )
+        """)
+        self. conn. commit()
+
+        self. registered_count = self. get_current_count()
+
+        # ------------------------------------
+        # スクロールエリア
+        # ------------------------------------
+        self. scroll = ctk. CTkScrollableFrame(self, fg_color = "white")
+        self. scroll. pack(fill = "both", expand = True, padx = 10, pady = 10)
+
+        # 登録件数表示
+        self. count_label = ctk. CTkLabel(
+            self. scroll,
+            text = f"登録済み: {self. registered_count}件",
+            font = ("ふてほど丸ゴシック", 12),
+            text_color = "#555555"
+        )
+        self. count_label. pack(pady = (0, 6))
+
+        # 名前欄
+        ctk. CTkLabel(
+            self. scroll,
+            text = "名前",
+            font = ("ふてほど丸ゴシック", 12)
+        ). pack(anchor = "w", padx = 10)
+
+        self. name_entry = ctk. CTkEntry(self. scroll, width = 180, height = 26, placeholder_text = "NoTitle")
+        self. name_entry. pack(anchor = "w", padx = 10, pady = (0, 8))
+
+        # 3色分の入力欄(ベース/アクセント/サブ)
+        self. color_widgets = {}
+
+        self. build_color_row("base", "ベース", 70)
+        self. build_color_row("accent", "アクセント", 10)
+        self. build_color_row("sub", "サブ", 20)
+
+        # タグ選択
+        self. tone_group = TagGroup(self. scroll, "トーン", ["ビビッド", "ネオン", "くすみ", "パステル"])
+        self. era_group = TagGroup(self. scroll, "年代", ["70's", "80's", "90's", "00's"])
+        self. season_group = TagGroup(self. scroll, "季節", ["春", "夏", "秋", "冬"])
+
+        # 登録ボタン
+        self. register_btn = ctk. CTkButton(
+            self. scroll,
+            text = "この配色を登録",
+            width = 180,
+            height = 34,
+            corner_radius = 50,
+            fg_color = "#ff6f6f",
+            hover_color = "#e35555",
+            text_color = "white",
+            font = ("ふてほど丸ゴシック", 14, "bold"),
+            command = self. register_entry
+        )
+        self. register_btn. pack(pady = 12)
+
+
+    # ======================================
+    # 現在の登録件数を取得
+    # ======================================
+    def get_current_count(self):
+
+        self. cursor. execute("SELECT COUNT(*) FROM presets")
+        return self. cursor. fetchone()[0]
+
+
+    # ======================================
+    # 比率を決定する(手打ち欄があればそちらを優先)
+    # ======================================
+    def get_pct(self, key):
+
+        widgets = self. color_widgets[key]
+        override = widgets["override_entry"]. get(). strip()
+
+        if override:
+            try:
+                return int(override)
+            except ValueError:
+                print("比率は数字で入力してください")
+                return widgets["default_pct"]
+
+        return widgets["default_pct"]
+
+
+    # ======================================
+    # 色1つぶんの入力欄(スポイト＋コード欄＋比率)を作る
+    # ======================================
+    def build_color_row(self, key, label_text, default_pct):
+
+        row = ctk. CTkFrame(self. scroll, fg_color = "transparent")
+        row. pack(fill = "x", padx = 10, pady = 3)
+
+        ctk. CTkLabel(
+            row,
+            text = label_text,
+            width = 50,
+            font = ("ふてほど丸ゴシック", 12),
+            text_color = "#555555"
+        ). pack(side = "left")
+
+        eyedropper_btn = ctk. CTkButton(
+            row,
+            text = "💉",
+            width = 30,
+            height = 26,
+            corner_radius = 50,
+            fg_color = "#e6a5f8",
+            hover_color = "#866091",
+            text_color = "white",
+            command = lambda k = key: self. start_eyedropper(k)
+        )
+        eyedropper_btn. pack(side = "left", padx = 4)
+
+        ToolTip(eyedropper_btn, "スポイト")
+
+        hex_entry = ctk. CTkEntry(row, width = 80, height = 26, placeholder_text = "#FFFFFF")
+        hex_entry. pack(side = "left", padx = 4)
+        hex_entry. bind("<Return>", lambda e, k = key: self. on_hex_entry_enter(k))
+
+        preview = ctk. CTkLabel(
+            row,
+            text = "",
+            width = 26,
+            height = 26,
+            corner_radius = 6,
+            fg_color = "#FFFFFF"
+        )
+        preview. pack(side = "left", padx = 4)
+
+        # 既定の比率(コード欄のすぐ右隣に表示、固定値)
+        ctk. CTkLabel(
+            row,
+            text = f"{default_pct}%",
+            width = 35,
+            font = ("ふてほど丸ゴシック", 11),
+            text_color = "#555555"
+        ). pack(side = "left", padx = 4)
+
+        # 手打ちで上書きしたい時だけ使う欄(一番右端、優先される)
+        override_entry = ctk. CTkEntry(row, width = 45, height = 26, placeholder_text = "%指定")
+        override_entry. pack(side = "left", padx = 4)
+
+        self. color_widgets[key] = {
+            "hex_entry": hex_entry,
+            "preview": preview,
+            "default_pct": default_pct,
+            "override_entry": override_entry
+        }
+
+
+    # ======================================
+    # スポイト機能(COLpama本体と同じ仕組み)
+    # ======================================
+    def start_eyedropper(self, key):
+
+        if hasattr(self, "overlay") and self. overlay. winfo_exists():
+            return
+
+        self. eyedropper_target = key
+
+        self. overlay = tk. Toplevel(self)
+        self. overlay. attributes("-alpha", 0.01)
+        self. overlay. attributes("-topmost", True)
+        self. overlay. overrideredirect(True)
+        self. overlay. configure(cursor = "crosshair")
+
+        vx = self. winfo_vrootx()
+        vy = self. winfo_vrooty()
+        vw = self. winfo_vrootwidth()
+        vh = self. winfo_vrootheight()
+
+        self. overlay. geometry(f"{vw}x{vh}+{vx}+{vy}")
+
+        self. overlay. bind("<Button-1>", self. pick_color)
+        self. overlay. bind("<Escape>", self. cancel_eyedropper)
+
+        self. overlay. focus_force()
+
+
+    def pick_color(self, event):
+
+        screenshot = ImageGrab. grab(
+            bbox = (event. x_root, event. y_root, event. x_root + 1, event. y_root + 1),
+            all_screens = True
+        )
+        rgb = screenshot. getpixel((0, 0))
+        hex_color = "#{:02x}{:02x}{:02x}". format(*rgb[:3])
+
+        self. apply_color(self. eyedropper_target, hex_color)
+        self. overlay. destroy()
+
+
+    def cancel_eyedropper(self, event = None):
+
+        self. overlay. destroy()
+
+
+    # ======================================
+    # 色を反映する(スポイト・手入力共通)
+    # ======================================
+    def apply_color(self, key, hex_color):
+
+        widgets = self. color_widgets[key]
+
+        widgets["hex_entry"]. delete(0, "end")
+        widgets["hex_entry"]. insert(0, hex_color)
+        widgets["preview"]. configure(fg_color = hex_color)
+
+
+    def on_hex_entry_enter(self, key):
+
+        value = self. color_widgets[key]["hex_entry"]. get(). strip()
+
+        if not value. startswith("#"):
+            value = "#" + value
+
+        if len(value) == 7:
+            try:
+                int(value[1:], 16)
+                self. apply_color(key, value)
+            except ValueError:
+                print("無効なカラーコードです")
+
+
+    # ======================================
+    # 入力内容をSQLiteに登録する
+    # ======================================
+    def register_entry(self):
+
+        name = self. name_entry. get(). strip() or "NoTitle"
+
+        base_hex = self. color_widgets["base"]["hex_entry"]. get(). strip()
+        accent_hex = self. color_widgets["accent"]["hex_entry"]. get(). strip()
+        sub_hex = self. color_widgets["sub"]["hex_entry"]. get(). strip()
+
+        if not (base_hex and accent_hex and sub_hex):
+            print("3色すべて入力してください")
+            return
+
+        base_pct = self. get_pct("base")
+        accent_pct = self. get_pct("accent")
+        sub_pct = self. get_pct("sub")
+
+        # 新規タグがあればボタン化してから、実際に使うタグ名を取得
+        tone_tags = self. tone_group. apply_new_tag_if_any()
+        era_tags = self. era_group. apply_new_tag_if_any()
+        season_tags = self. season_group. apply_new_tag_if_any()
+
+        all_tags = tone_tags + era_tags + season_tags
+        tags = ",". join(all_tags)
+
+        self. cursor. execute("""
+            INSERT INTO presets (name, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct, tags)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (name, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct, tags))
+
+        self. conn. commit()
+
+        self. registered_count += 1
+        self. count_label. configure(text = f"登録済み: {self. registered_count}件")
+
+        self. clear_form()
+
+
+    # ======================================
+    # 次の1件を入力しやすいようにフォームをリセット
+    # ======================================
+    def clear_form(self):
+
+        self. name_entry. delete(0, "end")
+
+        for key in self. color_widgets:
+            self. color_widgets[key]["hex_entry"]. delete(0, "end")
+            self. color_widgets[key]["preview"]. configure(fg_color = "#FFFFFF")
+            self. color_widgets[key]["override_entry"]. delete(0, "end")
+
+        self. tone_group. reset()
+        self. era_group. reset()
+        self. season_group. reset()
+
+
+app = DataEntryApp()
+app. mainloop()
+```
+
+## 5. 実装済みの機能 / 次に着手すべき機能・残っているバグ
+
+### 実装済み
+- **TEST03.PY**
+  - ヘッダー(🏠トップへ戻る、全セクションを初期状態にリセット)
+  - セレクト: スポイト(マルチモニタ対応、リアルタイムプレビュー)、カラーコード手入力(#省略可)、コピー機能、色相リング+彩度明度四角のカラーピッカー(白丸インジケーター付き、スポイト・コード入力と相互同期)、色プレビュー(白選択時のみ黒縁)
+  - カテゴリ: トーン・年代・季節の単一選択ボタン(SingleSelectGroup)
+  - プリセット: 6タブ切り替えUI、📷スクショ保存、🗑️削除、✏️名前登録、3色スウォッチ+コード表示+コピー
+  - ラッキーカラー: 未実装(工事中画像のみ)
+- **preset_entry_tool.py**
+  - 3色(ベース/アクセント/サブ)のスポイト+コード入力+比率(既定値70/10/20、手打ちで上書き可)
+  - トーン/年代/季節のタグ選択(TagGroup: 複数選択・トグル式、新規タグ追加機能、4個ごとに折り返し)
+  - 名前欄、登録ボタンでSQLite(colpama.db)へのINSERT、登録件数表示、フォーム自動クリア
+
+### 次に着手すべき機能(未実装)
+1. **GO!ボタンの本実装**: セレクト/カテゴリのGO!ボタンは現状コンソール出力のみの仮実装。本来はSQLite(colpama.db)から条件に合う配色を検索し、ベース・アクセント・サブの3色+色比率を結果画面として表示する機能が必要
+2. **ラッキーカラーセクション**: 中身が全くの未着手(工事中画像のみ)
+3. **プリセットの「GO結果からの自動登録」機能**: セレクト/カテゴリ/ラッキーカラーで出た3色を気に入ったら、空いている6タブのプリセット枠(1→2→3…)に自動で保存する機能。現状プリセットの✏️は「名前を後から付ける」だけの別機能で、GO結果を保存する導線はまだない
+4. **色比率のUI表示**: 3色スウォッチ+コードの下に「COLOR BALANCE」のような横長バー(BASE/ACCENT/SUBを幅の割合で視覚化)を追加したいという要望あり(参考画像共有済み、未実装)
+5. **カテゴリのタグ選択のUX**: 本体側(TEST03.PY)のSingleSelectGroupは単一選択のまま。preset_entry_tool.py側は複数選択・トグル式に変更済みだが、本体側も同様に複数選択にすべきかは要検討・未確定
+6. **「データを取ってきて出力する」タブ数が6か9か未確定**(9タブになる可能性について言及あり、詳細未整理)
+7. **プリセットの永続保存**: 現状`self.preset_data`はメモリ上の一時データのみで、アプリを閉じると消える。SQLite等を使った永続化は未着手
+
+### 既知の注意点・落とし穴(過去に発生したバグの傾向)
+- `ctk.CTkButton`等の引数リストでコンマ抜け・`text_color`等の重複指定によるSyntaxErrorが頻発していた
+- 絵文字に異体字セレクタ(️, U+FE0F)が付いていると、ボタンの`width`指定通りにセンタリングされない・幅がずれる問題が発生する(`🗑️`→`🗑`、`✏️`→`✏`のように単体の絵文字に変えることで解決)
+- `CTkFrame`は`width`/`height`未指定だと中身が空でも200×200pxのデフォルトサイズを確保してしまうため、中身が動的に変わる空フレームには明示的に`height`(または`width`)を指定する必要がある
+- `tk.Toplevel`のgeometry文字列(`f"+{x}+{y}"`等)はスペースを含めると`TclError`になる
+- マルチモニタ環境でのスクリーンショット取得には`ImageGrab.grab(..., all_screens=True)`が必要(付けないとメインモニタしか正しく取得できない)
+- スポイトのオーバーレイウィンドウは、閉じ忘れると重なって画面が白っぽく見える問題があったため、`start_eyedropper`内で多重生成防止のガード(`hasattr(self, "overlay") and self.overlay.winfo_exists()`)を入れている
+
+## 6. コーディングの好み・ルール
+
+- **`self.`の後にスペースを入れる**のがユーザーの好み(例: `self. configure(...)`)。ユーザー自身が書く時はこの書き方をする。Claudeがコピペ用に渡すコードはスペースなしでも問題なく、ユーザーが後で自分のペースで直す
+- **コメントのインデントを意図的に段差させる**箇所がある(例: セクション区切りのコメントを行頭から書く等)。これは分かりやすさのための意図的なスタイルなので、統一する必要はない
+- コードを提示する際は、**「どのクラス/どの既存メソッドの近くに追加するか」「何をする処理か」をセットで明記**してほしいという要望がある(単にコードブロックだけを渡すのではなく、位置づけの説明を必須で添える)
+- 大きな仕様変更や新機能に着手する前に、**方向性を確認する一言(選択肢の提示など)を挟んでほしい**傾向がある(過去のやり取りで、認識合わせのための質問が有効に機能している)
+- テストコードについて言及なし(現状、自動テストは書いていない。データベース周りは`insert_test.py`的な使い捨てスクリプトで動作確認する流れだった)
+- 命名規則は特に厳格な指定はないが、スネークケース(`preset_entry_tool.py`, `hex_entry`, `on_select_go`など)で統一されている

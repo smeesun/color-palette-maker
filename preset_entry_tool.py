@@ -62,11 +62,12 @@ class ToolTip:
 # ======================================
 class TagGroup:
 
-    def __init__(self, parent, title, options, font_name = "ふてほど丸ゴシック"):
+    def __init__(self, parent, title, options, font_name = "ふてほど丸ゴシック", on_new_tag = None):
 
         self. selected = []
         self. buttons = {}
         self. font_name = font_name
+        self. on_new_tag = on_new_tag
 
         ctk. CTkLabel(
             parent,
@@ -206,6 +207,10 @@ class TagGroup:
             if new_text not in self. buttons:
                 self. add_new_tag_button(new_text)
 
+                # 次回起動時にも残るよう、呼び出し元(DataEntryApp)に保存を任せる
+                if self. on_new_tag is not None:
+                    self. on_new_tag(new_text)
+
             if self. selected is None:
                 self. selected = []
 
@@ -248,12 +253,40 @@ class DataEntryApp(ctk. CTk):
                 accent_pct INTEGER,
                 sub_hex TEXT,
                 sub_pct INTEGER,
-                tags TEXT
+                tone_tags TEXT,
+                era_tags TEXT,
+                season_tags TEXT
+            )
+        """)
+
+        # カテゴリ(トーン/年代/季節)で「新規」欄から追加したタグを保存しておくテーブル
+        # これが無いとアプリを再起動した時に追加したタグのボタンが消えてしまう
+        self. cursor. execute("""
+            CREATE TABLE IF NOT EXISTS custom_tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_name TEXT,
+                tag TEXT,
+                UNIQUE(group_name, tag)
             )
         """)
         self. conn. commit()
 
         self. registered_count = self. get_current_count()
+
+        # ------------------------------------
+        # 編集モード用の状態(データ一覧の行クリックで編集開始した時に使う)
+        # ------------------------------------
+        self. editing_id = None
+        self. editing_extra_tags = {"tone": [], "era": [], "season": []}
+
+        # ------------------------------------
+        # データ一覧用の状態
+        # ------------------------------------
+        self. list_page_size = 30
+        self. list_all_rows = []
+        self. list_page_index = 0
+        self. list_page_buttons = []
+        self. list_sort_order = "new"  # "new"=新しい順 / "old"=古い順
 
         # ------------------------------------
         # スクロールエリア
@@ -270,15 +303,24 @@ class DataEntryApp(ctk. CTk):
         )
         self. count_label. pack(pady = (0, 6))
 
-        # 名前欄
+        # 名前欄(入力はさせない。次に何番として登録されるかを表示するだけ)
         ctk. CTkLabel(
             self. scroll,
             text = "名前",
             font = ("ふてほど丸ゴシック", 12)
         ). pack(anchor = "w", padx = 10)
 
-        self. name_entry = ctk. CTkEntry(self. scroll, width = 180, height = 26, placeholder_text = "NoTitle")
-        self. name_entry. pack(anchor = "w", padx = 10, pady = (0, 8))
+        self. name_display = ctk. CTkLabel(
+            self. scroll,
+            text = str(self. registered_count + 1),
+            width = 180,
+            height = 26,
+            corner_radius = 6,
+            fg_color = "#eeeeee",
+            text_color = "#555555",
+            anchor = "w"
+        )
+        self. name_display. pack(anchor = "w", padx = 10, pady = (0, 8))
 
         # 3色分の入力欄(ベース/アクセント/サブ)
         self. color_widgets = {}
@@ -288,9 +330,23 @@ class DataEntryApp(ctk. CTk):
         self. build_color_row("sub", "サブ", 20)
 
         # タグ選択
-        self. tone_group = TagGroup(self. scroll, "トーン", ["ビビッド", "ネオン", "くすみ", "パステル"])
-        self. era_group = TagGroup(self. scroll, "年代", ["70's", "80's", "90's", "00's"])
-        self. season_group = TagGroup(self. scroll, "季節", ["春", "夏", "秋", "冬"])
+        self. tone_group = TagGroup(
+            self. scroll, "トーン", ["ビビッド", "ネオン", "くすみ", "パステル"],
+            on_new_tag = lambda tag: self. save_custom_tag("トーン", tag)
+        )
+        self. era_group = TagGroup(
+            self. scroll, "年代", ["70's", "80's", "90's", "00's"],
+            on_new_tag = lambda tag: self. save_custom_tag("年代", tag)
+        )
+        self. season_group = TagGroup(
+            self. scroll, "季節", ["春", "夏", "秋", "冬"],
+            on_new_tag = lambda tag: self. save_custom_tag("季節", tag)
+        )
+
+        # 前回までに追加された新規タグを復元する(保存はここではしない)
+        self. restore_custom_tags(self. tone_group, "トーン")
+        self. restore_custom_tags(self. era_group, "年代")
+        self. restore_custom_tags(self. season_group, "季節")
 
         # 登録ボタン
         self. register_btn = ctk. CTkButton(
@@ -305,7 +361,46 @@ class DataEntryApp(ctk. CTk):
             font = ("ふてほど丸ゴシック", 14, "bold"),
             command = self. register_entry
         )
-        self. register_btn. pack(pady = 12)
+        self. register_btn. pack(pady = (12, 2))
+
+        # 編集中であることを示す表示(通常時は空文字で非表示状態)
+        self. edit_status_label = ctk. CTkLabel(
+            self. scroll,
+            text = "",
+            font = ("ふてほど丸ゴシック", 11),
+            text_color = "#e35555"
+        )
+        self. edit_status_label. pack(pady = (0, 2))
+
+        # 編集をやめるボタン(編集中のみ表示、普段は非表示)
+        self. cancel_edit_btn = ctk. CTkButton(
+            self. scroll,
+            text = "編集をやめる",
+            width = 140,
+            height = 26,
+            corner_radius = 50,
+            fg_color = "#dddddd",
+            hover_color = "#cccccc",
+            text_color = "black",
+            font = ("ふてほど丸ゴシック", 12),
+            command = self. cancel_edit
+        )
+        # 最初は表示しない(編集開始時にpackする)
+
+        # データ一覧ボタン
+        self. list_btn = ctk. CTkButton(
+            self. scroll,
+            text = "データ一覧",
+            width = 180,
+            height = 34,
+            corner_radius = 50,
+            fg_color = "#e6a5f8",
+            hover_color = "#866091",
+            text_color = "white",
+            font = ("ふてほど丸ゴシック", 14, "bold"),
+            command = self. open_data_list
+        )
+        self. list_btn. pack(pady = (8, 20))
 
 
     # ======================================
@@ -315,6 +410,33 @@ class DataEntryApp(ctk. CTk):
 
         self. cursor. execute("SELECT COUNT(*) FROM presets")
         return self. cursor. fetchone()[0]
+
+
+    # ======================================
+    # カテゴリの「新規」欄から追加されたタグをcolpama.dbに保存する
+    # ======================================
+    def save_custom_tag(self, group_name, tag):
+
+        self. cursor. execute(
+            "INSERT OR IGNORE INTO custom_tags (group_name, tag) VALUES (?, ?)",
+            (group_name, tag)
+        )
+        self. conn. commit()
+
+
+    # ======================================
+    # 起動時に、そのカテゴリで過去に追加された新規タグをボタンとして復元する
+    # ======================================
+    def restore_custom_tags(self, group, group_name):
+
+        self. cursor. execute(
+            "SELECT tag FROM custom_tags WHERE group_name = ? ORDER BY id ASC",
+            (group_name,)
+        )
+
+        for (tag,) in self. cursor. fetchall():
+            if tag not in group. buttons:
+                group. add_new_tag_button(tag)
 
 
     # ======================================
@@ -480,7 +602,8 @@ class DataEntryApp(ctk. CTk):
     # ======================================
     def register_entry(self):
 
-        name = self. name_entry. get(). strip() or "NoTitle"
+        # 名前は自動採番(次に登録される番号)。編集(更新)の時は元の値を変えない
+        name = str(self. registered_count + 1)
 
         base_hex = self. color_widgets["base"]["hex_entry"]. get(). strip()
         accent_hex = self. color_widgets["accent"]["hex_entry"]. get(). strip()
@@ -494,23 +617,50 @@ class DataEntryApp(ctk. CTk):
         accent_pct = self. get_pct("accent")
         sub_pct = self. get_pct("sub")
 
-        # 新規タグがあればボタン化してから、実際に使うタグ名を取得
-        tone_tags = self. tone_group. apply_new_tag_if_any()
-        era_tags = self. era_group. apply_new_tag_if_any()
-        season_tags = self. season_group. apply_new_tag_if_any()
+        # 新規タグがあればボタン化してから、実際に使うタグ名をカテゴリ別に取得
+        tone_selected = self. tone_group. apply_new_tag_if_any()
+        era_selected = self. era_group. apply_new_tag_if_any()
+        season_selected = self. season_group. apply_new_tag_if_any()
 
-        all_tags = tone_tags + era_tags + season_tags
-        tags = ",". join(all_tags)
+        # 編集中の場合、元々付いていたが今のグループには存在しないタグを、同じカテゴリのまま保持しておく
+        if self. editing_id is not None:
+            for tag in self. editing_extra_tags["tone"]:
+                if tag not in tone_selected:
+                    tone_selected. append(tag)
 
-        self. cursor. execute("""
-            INSERT INTO presets (name, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct, tags)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (name, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct, tags))
+            for tag in self. editing_extra_tags["era"]:
+                if tag not in era_selected:
+                    era_selected. append(tag)
 
-        self. conn. commit()
+            for tag in self. editing_extra_tags["season"]:
+                if tag not in season_selected:
+                    season_selected. append(tag)
 
-        self. registered_count += 1
-        self. count_label. configure(text = f"登録済み: {self. registered_count}件")
+        tone_tags = ",". join(tone_selected)
+        era_tags = ",". join(era_selected)
+        season_tags = ",". join(season_selected)
+
+        if self. editing_id is None:
+            # 新規登録
+            self. cursor. execute("""
+                INSERT INTO presets (name, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct, tone_tags, era_tags, season_tags)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (name, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct, tone_tags, era_tags, season_tags))
+
+            self. conn. commit()
+
+            self. registered_count += 1
+            self. count_label. configure(text = f"登録済み: {self. registered_count}件")
+        else:
+            # 既存データの上書き更新(名前欄は無いので元の名前はそのまま変更しない)
+            self. cursor. execute("""
+                UPDATE presets
+                SET base_hex = ?, base_pct = ?, accent_hex = ?, accent_pct = ?, sub_hex = ?, sub_pct = ?,
+                    tone_tags = ?, era_tags = ?, season_tags = ?
+                WHERE id = ?
+            """, (base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct, tone_tags, era_tags, season_tags, self. editing_id))
+
+            self. conn. commit()
 
         self. clear_form()
 
@@ -520,7 +670,7 @@ class DataEntryApp(ctk. CTk):
     # ======================================
     def clear_form(self):
 
-        self. name_entry. delete(0, "end")
+        self. name_display. configure(text = str(self. registered_count + 1))
 
         for key in self. color_widgets:
             self. color_widgets[key]["hex_entry"]. delete(0, "end")
@@ -530,6 +680,501 @@ class DataEntryApp(ctk. CTk):
         self. tone_group. reset()
         self. era_group. reset()
         self. season_group. reset()
+
+        # 編集モードだったら解除して、新規登録用の表示に戻す
+        self. editing_id = None
+        self. editing_extra_tags = {"tone": [], "era": [], "season": []}
+        self. edit_status_label. configure(text = "")
+        self. cancel_edit_btn. pack_forget()
+        self. register_btn. configure(text = "この配色を登録")
+
+
+    # ======================================
+    # 編集をやめて、フォームを空の状態に戻す
+    # ======================================
+    def cancel_edit(self):
+
+        self. clear_form()
+
+
+    # ======================================
+    # データ一覧の行を、上のフォームに読み込んで編集状態にする
+    # ======================================
+    def load_preset_for_edit(self, row):
+
+        self. close_data_list()
+
+        self. editing_id = row["id"]
+
+        self. name_display. configure(text = str(row["no"]))
+
+        self. apply_color("base", row["base_hex"])
+        self. apply_color("accent", row["accent_hex"])
+        self. apply_color("sub", row["sub_hex"])
+
+        for key, pct in (
+            ("base", row["base_pct"]),
+            ("accent", row["accent_pct"]),
+            ("sub", row["sub_pct"]),
+        ):
+            override_entry = self. color_widgets[key]["override_entry"]
+            override_entry. delete(0, "end")
+            override_entry. insert(0, str(pct))
+
+        self. tone_group. reset()
+        self. era_group. reset()
+        self. season_group. reset()
+
+        # カテゴリごとの列をそれぞれのグループに振り分ける。ボタンが無いタグ(古いカスタムタグなど)は
+        # editing_extra_tags に退避しておき、更新登録の時に同じカテゴリのまま付け直す
+        self. editing_extra_tags = {"tone": [], "era": [], "season": []}
+
+        for extra_key, group, column in (
+            ("tone", self. tone_group, "tone_tags"),
+            ("era", self. era_group, "era_tags"),
+            ("season", self. season_group, "season_tags"),
+        ):
+            tags = [t for t in (row[column] or ""). split(",") if t]
+
+            for tag in tags:
+                if tag in group. buttons:
+                    group. select(tag)
+                else:
+                    self. editing_extra_tags[extra_key]. append(tag)
+
+        self. edit_status_label. configure(text = f"No.{row['no']}を編集中(登録すると上書きされます)")
+        self. cancel_edit_btn. pack(pady = (0, 2), before = self. list_btn)
+        self. register_btn. configure(text = "この内容で更新する")
+
+
+    # ======================================
+    # データ一覧：登録済みデータを1件削除する
+    # ======================================
+    def delete_preset(self, row_id):
+
+        self. cursor. execute("DELETE FROM presets WHERE id = ?", (row_id,))
+        self. conn. commit()
+
+        self. registered_count = self. get_current_count()
+        self. count_label. configure(text = f"登録済み: {self. registered_count}件")
+
+        keep_page = self. list_page_index
+        self. refresh_list_data()
+        self. build_list_pagination(keep_page = keep_page)
+
+
+    # ======================================
+    # データ一覧：画面を開く(ウィンドウ最大化＋登録フォームを隠して一覧を表示)
+    # ======================================
+    def open_data_list(self):
+
+        self. scroll. pack_forget()
+
+        self. state("zoomed")
+
+        if not hasattr(self, "list_frame"):
+            self. build_list_frame()
+
+        self. refresh_list_data()
+        self. build_list_pagination()
+
+        self. list_frame. pack(fill = "both", expand = True, padx = 10, pady = 10)
+
+
+    # ======================================
+    # データ一覧：画面を閉じて登録フォームに戻す(ウィンドウも元のサイズに戻す)
+    # ======================================
+    def close_data_list(self):
+
+        if hasattr(self, "list_frame"):
+            self. list_frame. pack_forget()
+
+        self. state("normal")
+        self. geometry("550x950")
+
+        self. scroll. pack(fill = "both", expand = True, padx = 10, pady = 10)
+
+        # 一覧側で削除している可能性があるので、件数と次の番号を最新の状態に合わせ直す
+        # (編集読込の場合はこの直後にload_preset_for_editがNo.表示に上書きする)
+        self. registered_count = self. get_current_count()
+        self. count_label. configure(text = f"登録済み: {self. registered_count}件")
+        self. name_display. configure(text = str(self. registered_count + 1))
+
+
+    # ======================================
+    # データ一覧：枠組み(戻るボタン・見出し行・一覧本体・ページ切り替え)を作る
+    # ======================================
+    def build_list_frame(self):
+
+        self. list_frame = ctk. CTkFrame(self, fg_color = "white")
+
+        # ------------------------------------
+        # 上段：戻るボタンとタイトル
+        # ------------------------------------
+        top_row = ctk. CTkFrame(self. list_frame, fg_color = "transparent")
+        top_row. pack(fill = "x", padx = 10, pady = (10, 4))
+
+        back_btn = ctk. CTkButton(
+            top_row,
+            text = "← 戻る",
+            width = 90,
+            height = 30,
+            corner_radius = 50,
+            fg_color = "#dddddd",
+            hover_color = "#cccccc",
+            text_color = "black",
+            font = ("ふてほど丸ゴシック", 13),
+            command = self. close_data_list
+        )
+        back_btn. pack(side = "left")
+
+        ctk. CTkLabel(
+            top_row,
+            text = "データ一覧",
+            font = ("ふてほど丸ゴシック", 20, "bold")
+        ). pack(side = "left", padx = 20)
+
+        # ------------------------------------
+        # 並び順切り替え(新しい順／古い順)
+        # ------------------------------------
+        sort_row = ctk. CTkFrame(top_row, fg_color = "transparent")
+        sort_row. pack(side = "left", padx = (20, 0))
+
+        ctk. CTkLabel(
+            sort_row,
+            text = "並び順:",
+            font = ("ふてほど丸ゴシック", 12),
+            text_color = "#555555"
+        ). pack(side = "left", padx = (0, 6))
+
+        self. sort_new_btn = ctk. CTkButton(
+            sort_row,
+            text = "新しい順",
+            width = 80,
+            height = 28,
+            corner_radius = 50,
+            font = ("ふてほど丸ゴシック", 12),
+            command = lambda: self. set_list_sort("new")
+        )
+        self. sort_new_btn. pack(side = "left", padx = 2)
+
+        self. sort_old_btn = ctk. CTkButton(
+            sort_row,
+            text = "古い順",
+            width = 80,
+            height = 28,
+            corner_radius = 50,
+            font = ("ふてほど丸ゴシック", 12),
+            command = lambda: self. set_list_sort("old")
+        )
+        self. sort_old_btn. pack(side = "left", padx = 2)
+
+        self. update_sort_buttons()
+
+        # ------------------------------------
+        # 表の列定義(見出し行と各データ行で共通して使う)
+        # ------------------------------------
+        self. list_columns = [
+            ("no", "No.", 50),
+            ("base", "ベース", 110),
+            ("base_pct", "ベース%", 65),
+            ("accent", "アクセント", 110),
+            ("accent_pct", "アクセント%", 80),
+            ("sub", "サブ", 110),
+            ("sub_pct", "サブ%", 65),
+            ("tone_tags", "トーン", 130),
+            ("era_tags", "年代", 100),
+            ("season_tags", "季節", 100),
+        ]
+
+        # ------------------------------------
+        # 見出し行(クリックしても何も起きない、ただのラベル)
+        # ------------------------------------
+        header_row = ctk. CTkFrame(self. list_frame, fg_color = "#eeeeee")
+        header_row. pack(fill = "x", padx = 10, pady = (6, 0))
+
+        for _, label_text, width in self. list_columns:
+            ctk. CTkLabel(
+                header_row,
+                text = label_text,
+                width = width,
+                font = ("ふてほど丸ゴシック", 12, "bold"),
+                text_color = "#555555"
+            ). pack(side = "left", padx = 2, pady = 6)
+
+        # 削除ボタン分のスペース(見出しは空欄でよい)
+        ctk. CTkLabel(header_row, text = "", width = 60). pack(side = "left")
+
+        # ------------------------------------
+        # データ行を並べるスクロールエリア
+        # ------------------------------------
+        self. list_rows_scroll = ctk. CTkScrollableFrame(self. list_frame, fg_color = "white")
+        self. list_rows_scroll. pack(fill = "both", expand = True, padx = 10, pady = (0, 4))
+
+        # ------------------------------------
+        # ページ切り替えボタンの行
+        # ------------------------------------
+        self. list_page_row = ctk. CTkFrame(self. list_frame, fg_color = "transparent")
+        self. list_page_row. pack(fill = "x", padx = 10, pady = (0, 10))
+
+
+    # ======================================
+    # データ一覧：SQLiteから最新の内容を読み直す
+    # 登録された順(id昇順)にNo.を1から振り直す。こうすると途中の1件を削除しても
+    # 残りは自動的に詰まった連番になり、編集(id不変)ではNo.が変わらない
+    # ======================================
+    def refresh_list_data(self):
+
+        self. cursor. execute("""
+            SELECT id, name, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct,
+                   tone_tags, era_tags, season_tags
+            FROM presets
+            ORDER BY id ASC
+        """)
+
+        rows = self. cursor. fetchall()
+
+        self. list_all_rows = [
+            {
+                "no": i + 1,
+                "id": r[0],
+                "name": r[1],
+                "base_hex": r[2],
+                "base_pct": r[3],
+                "accent_hex": r[4],
+                "accent_pct": r[5],
+                "sub_hex": r[6],
+                "sub_pct": r[7],
+                "tone_tags": r[8],
+                "era_tags": r[9],
+                "season_tags": r[10],
+            }
+            for i, r in enumerate(rows)
+        ]
+
+
+    # ======================================
+    # データ一覧：並び順ボタンの見た目を、現在の選択状態に合わせて更新
+    # ======================================
+    def update_sort_buttons(self):
+
+        if self. list_sort_order == "new":
+            self. sort_new_btn. configure(fg_color = "#ff9fd0", hover_color = "#ff9fd0", text_color = "white")
+            self. sort_old_btn. configure(fg_color = "#e6a5f8", hover_color = "#866091", text_color = "white")
+        else:
+            self. sort_old_btn. configure(fg_color = "#ff9fd0", hover_color = "#ff9fd0", text_color = "white")
+            self. sort_new_btn. configure(fg_color = "#e6a5f8", hover_color = "#866091", text_color = "white")
+
+
+    # ======================================
+    # データ一覧：並び順(新しい順／古い順)を切り替える
+    # ======================================
+    def set_list_sort(self, order):
+
+        if self. list_sort_order == order:
+            return
+
+        self. list_sort_order = order
+        self. update_sort_buttons()
+        self. build_list_pagination()
+
+
+    # ======================================
+    # データ一覧：現在の並び順設定に沿った表示用の行リストを返す
+    # ======================================
+    def get_display_rows(self):
+
+        if self. list_sort_order == "new":
+            return list(reversed(self. list_all_rows))
+
+        return self. list_all_rows
+
+
+    # ======================================
+    # データ一覧：件数に応じてページボタンを作り直す
+    # ======================================
+    def build_list_pagination(self, keep_page = 0):
+
+        for widget in self. list_page_row. winfo_children():
+            widget. destroy()
+
+        total = len(self. list_all_rows)
+        total_pages = max(1, (total + self. list_page_size - 1) // self. list_page_size)
+
+        self. list_page_buttons = []
+
+        for i in range(total_pages):
+            btn = ctk. CTkButton(
+                self. list_page_row,
+                text = str(i + 1),
+                width = 36,
+                height = 28,
+                corner_radius = 0,
+                fg_color = "white",
+                hover_color = "#f0d9f5",
+                text_color = "#555555",
+                border_width = 1,
+                border_color = "#d0d0d0",
+                command = lambda i = i: self. switch_list_page(i)
+            )
+            btn. pack(side = "left")
+
+            self. list_page_buttons. append(btn)
+
+        target_page = keep_page if keep_page < total_pages else 0
+        self. switch_list_page(target_page)
+
+
+    # ======================================
+    # データ一覧：表示するページを切り替える
+    # ======================================
+    def switch_list_page(self, index):
+
+        self. list_page_index = index
+
+        for i, btn in enumerate(self. list_page_buttons):
+            if i == index:
+                btn. configure(fg_color = "#ff9fd0", text_color = "white")
+            else:
+                btn. configure(fg_color = "white", text_color = "#555555")
+
+        self. render_list_page(index)
+
+
+    # ======================================
+    # データ一覧：現在のページぶんの行を描画する
+    # ======================================
+    def render_list_page(self, index):
+
+        for widget in self. list_rows_scroll. winfo_children():
+            widget. destroy()
+
+        start = index * self. list_page_size
+        page_rows = self. get_display_rows()[start : start + self. list_page_size]
+
+        if not page_rows:
+            ctk. CTkLabel(
+                self. list_rows_scroll,
+                text = "まだ登録されたデータがありません",
+                font = ("ふてほど丸ゴシック", 13),
+                text_color = "#888888"
+            ). pack(pady = 20)
+            return
+
+        for row in page_rows:
+            self. build_list_row(row)
+
+
+    # ======================================
+    # データ一覧：行を1つ作る(クリックで編集読込、右端に削除ボタン)
+    # ======================================
+    def build_list_row(self, row):
+
+        row_frame = ctk. CTkFrame(self. list_rows_scroll, fg_color = "white")
+        row_frame. pack(fill = "x", pady = 1)
+
+        # クリックで編集読込する部分(削除ボタンは含めない)
+        content_frame = ctk. CTkFrame(row_frame, fg_color = "white", cursor = "hand2")
+        content_frame. pack(side = "left", fill = "x", expand = True)
+
+        ctk. CTkLabel(
+            content_frame,
+            text = str(row["no"]),
+            width = 50,
+            anchor = "w",
+            font = ("ふてほど丸ゴシック", 12),
+            text_color = "#555555"
+        ). pack(side = "left", padx = 2, pady = 4)
+
+        self. build_color_cell(content_frame, row["base_hex"], 110)
+        self. build_pct_cell(content_frame, row["base_pct"], 65)
+
+        self. build_color_cell(content_frame, row["accent_hex"], 110)
+        self. build_pct_cell(content_frame, row["accent_pct"], 80)
+
+        self. build_color_cell(content_frame, row["sub_hex"], 110)
+        self. build_pct_cell(content_frame, row["sub_pct"], 65)
+
+        for column, width in (("tone_tags", 130), ("era_tags", 100), ("season_tags", 100)):
+            ctk. CTkLabel(
+                content_frame,
+                text = row[column] or "",
+                width = width,
+                anchor = "w",
+                font = ("ふてほど丸ゴシック", 11),
+                text_color = "#555555"
+            ). pack(side = "left", padx = 2, pady = 4)
+
+        delete_btn = ctk. CTkButton(
+            row_frame,
+            text = "🗑",
+            width = 40,
+            height = 28,
+            corner_radius = 50,
+            fg_color = "#dddddd",
+            hover_color = "#cccccc",
+            text_color = "black",
+            command = lambda r = row: self. delete_preset(r["id"])
+        )
+        delete_btn. pack(side = "left", padx = (2, 10))
+
+        ToolTip(delete_btn, "削除")
+
+        self. bind_row_click(content_frame, row)
+
+
+    # ======================================
+    # データ一覧：色スウォッチ＋HEXコードのセルを作る
+    # ======================================
+    def build_color_cell(self, parent, hex_color, width):
+
+        cell = ctk. CTkFrame(parent, fg_color = "transparent", width = width, height = 28)
+        cell. pack_propagate(False)
+        cell. pack(side = "left", padx = 2, pady = 4)
+
+        ctk. CTkLabel(
+            cell,
+            text = "",
+            width = 20,
+            height = 20,
+            corner_radius = 4,
+            fg_color = hex_color
+        ). pack(side = "left")
+
+        ctk. CTkLabel(
+            cell,
+            text = hex_color. upper(),
+            font = ("ふてほど丸ゴシック", 11),
+            text_color = "#555555"
+        ). pack(side = "left", padx = (4, 0))
+
+        return cell
+
+
+    # ======================================
+    # データ一覧：比率(%)だけのセルを作る
+    # ======================================
+    def build_pct_cell(self, parent, pct, width):
+
+        ctk. CTkLabel(
+            parent,
+            text = f"{pct}%",
+            width = width,
+            anchor = "w",
+            font = ("ふてほど丸ゴシック", 12),
+            text_color = "#555555"
+        ). pack(side = "left", padx = 2, pady = 4)
+
+
+    # ======================================
+    # データ一覧：行のどこをクリックしても編集読込されるように、子要素にも再帰でbindする
+    # ======================================
+    def bind_row_click(self, widget, row):
+
+        widget. bind("<Button-1>", lambda e, r = row: self. load_preset_for_edit(r))
+
+        for child in widget. winfo_children():
+            self. bind_row_click(child, row)
 
 
 app = DataEntryApp()
