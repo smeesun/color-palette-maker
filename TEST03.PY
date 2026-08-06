@@ -38,7 +38,6 @@ class ToolTip:
 
         self. tip_window = tw = tk. Toplevel(self. widget)
         tw. wm_overrideredirect(True)
-        tw. wm_geometry(f"+{x}+{y}")
 
         label = tk. Label(
             tw,
@@ -51,6 +50,18 @@ class ToolTip:
             pady = 2
         )
         label. pack()
+
+        # アプリのウィンドウ右端からはみ出る場合は、その分だけ左にずらす
+        tw. update_idletasks()
+        tip_width = tw. winfo_width()
+
+        root = self. widget. winfo_toplevel()
+        window_right = root. winfo_rootx() + root. winfo_width()
+
+        if x + tip_width > window_right:
+            x = window_right - tip_width - 10
+
+        tw. wm_geometry(f"+{x}+{y}")
 
 
     def hide_tip(self, event = None):
@@ -80,14 +91,19 @@ class SingleSelectGroup:
             text_color = "#555555"
         ). pack(anchor = "w", padx = 15, pady = (15, 5))
 
-        row = ctk. CTkFrame(parent, fg_color = "transparent")
-        row. pack(anchor = "w", padx = 15, pady = (0, 5))
+        # 4個ごとに折り返す(1行に詰め込みすぎるとボタンがウィンドウ幅からはみ出るため、
+        # カスタムタグ専用エリアと同じ「4個ごとに改行」のルールで並べる)
+        option_row = None
 
-        for option in options:
+        for i, option in enumerate(options):
+            if i % 4 == 0:
+                option_row = ctk. CTkFrame(parent, fg_color = "transparent")
+                option_row. pack(anchor = "w", padx = 15, pady = (0, 3))
+
             btn = ctk. CTkButton(
-                row,
+                option_row,
                 text = option,
-                width = 58,
+                width = 64,
                 corner_radius = 50,
                 fg_color = "#e6a5f8",
                 hover_color = "#866091",
@@ -124,7 +140,7 @@ class SingleSelectGroup:
         btn = ctk. CTkButton(
             self. current_extra_row,
             text = text,
-            width = 58,
+            width = 64,
             corner_radius = 50,
             fg_color = "#e6a5f8",
             hover_color = "#866091",
@@ -272,6 +288,18 @@ class App(ctk. CTk):
         # ======================================
         self. conn = sqlite3. connect("colpama.db")
         self. cursor = self. conn. cursor()
+
+        # 自分で保存するプリセット枠(1〜9)を、アプリを閉じても消えないように保存しておくテーブル
+        self. cursor. execute("""
+            CREATE TABLE IF NOT EXISTS my_preset_slots (
+                slot INTEGER PRIMARY KEY,
+                name TEXT,
+                base_hex TEXT,
+                accent_hex TEXT,
+                sub_hex TEXT
+            )
+        """)
+        self. conn. commit()
 
 
         # ======================================
@@ -634,35 +662,105 @@ class App(ctk. CTk):
         # ------------------------------------
         self. select_result_frame = ctk. CTkFrame(self, fg_color = "white")
 
+        # ------------------------------------
+        # 上段：戻る／大きく見る
+        # ------------------------------------
+        select_result_top_row = ctk. CTkFrame(self. select_result_frame, fg_color = "transparent")
+        select_result_top_row. pack(fill = "x", padx = 10, pady = (10, 0))
+
+        back_from_result_btn = ctk. CTkButton(
+            select_result_top_row,
+            text = "← 戻る",
+            width = 80,
+            height = 30,
+            corner_radius = 50,
+            fg_color = "#e6a5f8",
+            hover_color = "#866091",
+            text_color = "white",
+            font = ("マメロン 5 Hi Regular", 13),
+            command = self. close_select_result
+        )
+        back_from_result_btn. pack(side = "left")
+
+        detail_btn = ctk. CTkButton(
+            select_result_top_row,
+            text = "🔍",
+            width = 40,
+            height = 30,
+            corner_radius = 50,
+            fg_color = "#e6a5f8",
+            hover_color = "#866091",
+            text_color = "white"
+        )
+        detail_btn. pack(side = "right")
+
+        ToolTip(detail_btn, "拡大して詳しく見る")
+
+        # ------------------------------------
+        # 下段：スクショ／プリセットに登録(🔍と同じ右寄せ)
+        # ------------------------------------
+        select_result_second_row = ctk. CTkFrame(self. select_result_frame, fg_color = "transparent")
+        select_result_second_row. pack(fill = "x", padx = 10, pady = (6, 0))
+
+        register_result_btn = ctk. CTkButton(
+            select_result_second_row,
+            text = "📚",
+            width = 40,
+            height = 30,
+            corner_radius = 50,
+            fg_color = "#e6a5f8",
+            hover_color = "#866091",
+            text_color = "white",
+            command = self. register_result_to_preset
+        )
+        register_result_btn. pack(side = "right")
+
+        ToolTip(register_result_btn, "プリセットに登録")
+
+        screenshot_result_btn = ctk. CTkButton(
+            select_result_second_row,
+            text = "📷",
+            width = 40,
+            height = 30,
+            corner_radius = 50,
+            fg_color = "#e6a5f8",
+            hover_color = "#866091",
+            text_color = "white",
+            command = self. screenshot_select_result
+        )
+        screenshot_result_btn. pack(side = "right", padx = (0, 6))
+
+        ToolTip(screenshot_result_btn, "スクショ保存")
+
         ctk. CTkLabel(
             self. select_result_frame,
             text = "おすすめ3色",
-            font = ("ふてほど丸ゴシック", 22, "bold")
-        ). pack(pady = (30, 20))
+            font = ("マメロン 5 Hi Regular", 22, "bold")
+        ). pack(pady = (20, 20))
 
-        circle_row = ctk. CTkFrame(self. select_result_frame, fg_color = "transparent")
-        circle_row. pack(pady = (0, 10))
+        self. circle_row = ctk. CTkFrame(self. select_result_frame, fg_color = "transparent")
+        self. circle_row. pack(pady = (0, 10))
 
         self. result_circles = {}
         self. result_hex_labels = {}
 
         for key, label_text in (("base", "メインカラー"), ("accent", "アクセント"), ("sub", "サブ")):
-            col = ctk. CTkFrame(circle_row, fg_color = "transparent")
-            col. pack(side = "left", padx = 12)
+            col = ctk. CTkFrame(self. circle_row, fg_color = "transparent")
+            col. pack(side = "left", padx = 8)
 
             ctk. CTkLabel(
                 col,
                 text = label_text,
-                font = ("ふてほど丸ゴシック", 11),
-                text_color = "#888888"
-            ). pack(pady = (0, 4))
+                font = ("ふてほど丸ゴシック", 15),
+                text_color = "#777777"
+            ). pack(pady = (0, 6))
 
             circle = ctk. CTkLabel(
                 col,
                 text = "",
-                width = 90,
-                height = 90,
-                corner_radius = 45,
+                width = 110,
+                height = 110,
+                corner_radius = 55,
                 fg_color = "#FFFFFF"
             )
             circle. pack()
@@ -670,22 +768,22 @@ class App(ctk. CTk):
             hex_label = ctk. CTkLabel(
                 col,
                 text = "#FFFFFF",
-                font = ("ふてほど丸ゴシック", 12),
+                font = ("ふてほど丸ゴシック", 15),
                 text_color = "#555555"
             )
-            hex_label. pack(pady = (6, 0))
+            hex_label. pack(pady = (8, 0))
 
             self. result_circles[key] = circle
             self. result_hex_labels[key] = hex_label
 
         ctk. CTkLabel(
             self. select_result_frame,
-            text = "-色の比率-",
-            font = ("ふてほど丸ゴシック", 16, "bold"),
+            text = "-COLOR BALANCE-",
+            font = ("マメロン 5 Hi Regular", 16, "bold"),
             text_color = "#555555"
         ). pack(pady = (25, 10))
 
-        self. result_bar_frame = ctk. CTkFrame(self. select_result_frame, fg_color = "transparent", width = 300, height = 40)
+        self. result_bar_frame = ctk. CTkFrame(self. select_result_frame, fg_color = "transparent", width = 340, height = 40)
         self. result_bar_frame. pack_propagate(False)
         self. result_bar_frame. pack(pady = (0, 10))
 
@@ -702,6 +800,19 @@ class App(ctk. CTk):
             seg. pack(side = "left", fill = "y")
 
             self. result_bar_segments[key] = seg
+
+        # ------------------------------------
+        # メインカラーが同じ配色が他にもある時だけ出す「ほかのカラーを見てみる」
+        # ------------------------------------
+        self. other_base_section = ctk. CTkFrame(self. select_result_frame, fg_color = "transparent")
+
+        self. other_base_go_btn = self. build_go_section(
+            self. other_base_section,
+            "メインカラーに合うほかのカラーを見てみる",
+            self. on_other_base_go
+        )
+
+        self. other_base_matches = []
 
         self. space()
 
@@ -820,17 +931,24 @@ class App(ctk. CTk):
 # ======================================
 # プリセット機能
 # ====================================== 
-        # 仮の3色(ダミー、後で実際のGO!ボタンの結果に差し替え予定)
-        self. dummy_palette = ["#ff6f9f", "#a5e6f8", "#e6a5f8"]
-
-        # 6枠分のデータ(colorsがNoneのうちは「まだ登録されていない」枠)
+        # 9枠分のデータ(colorsがNoneのうちは「まだ登録されていない」枠)
         self. preset_data = [
-            {"colors": None, "name": ""} for _ in range(6)
+            {"colors": None, "name": ""} for _ in range(9)
         ]
+
+        # 保存済みのプリセット枠があれば読み込む(アプリを再起動しても消えないように)
+        self. cursor. execute("SELECT slot, name, base_hex, accent_hex, sub_hex FROM my_preset_slots")
+
+        for slot, name, base_hex, accent_hex, sub_hex in self. cursor. fetchall():
+            if 0 <= slot < 9:
+                self. preset_data[slot] = {
+                    "colors": [base_hex, accent_hex, sub_hex],
+                    "name": name or ""
+                }
 
         self. current_preset_page = 0
 
-        # タブ(1〜6)の行
+        # タブ(1〜9)の行
         self. preset_tab_buttons = []
 
         preset_tab_row = ctk. CTkFrame(
@@ -839,7 +957,7 @@ class App(ctk. CTk):
         )
         preset_tab_row. pack(fill = "x", padx = 15, pady = (10, 0))
 
-        for i in range(6):
+        for i in range(9):
             tab_btn = ctk. CTkButton(
                 preset_tab_row,
                 text = str(i + 1),
@@ -1286,7 +1404,7 @@ class App(ctk. CTk):
         ctk. CTkLabel(
             parent,
             text = label_text,
-            font = ("ふてほど丸ゴシック", 14),
+            font = ("マメロン 5 Hi Regular", 14),
             text_color = "#555555"
         ). pack(pady = (20, 8))
 
@@ -1382,7 +1500,7 @@ class App(ctk. CTk):
     # ======================================
     def render_select_result(self, row):
 
-        _, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct = row
+        current_id, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct = row
 
         hexes = {"base": base_hex, "accent": accent_hex, "sub": sub_hex}
         pcts = {"base": base_pct, "accent": accent_pct, "sub": sub_pct}
@@ -1391,16 +1509,49 @@ class App(ctk. CTk):
             self. result_circles[key]. configure(fg_color = hexes[key])
             self. result_hex_labels[key]. configure(text = hexes[key]. upper())
 
-        total_bar_width = 300
+        total_bar_width = 340
 
         for key in ("base", "accent", "sub"):
             seg_width = max(1, round(total_bar_width * pcts[key] / 100))
 
             self. result_bar_segments[key]. configure(
                 width = seg_width,
-                fg_color = hexes[key],
-                text = f"{pcts[key]}%"
+                fg_color = hexes[key]
             )
+
+        # 同じベース色を持つ他の配色があるかを調べて、あるボタンだけ表示する
+        self. other_base_matches = self. get_other_base_matches(base_hex, current_id)
+
+        if self. other_base_matches:
+            self. other_base_section. pack(pady = (10, 10))
+        else:
+            self. other_base_section. pack_forget()
+
+
+    # ======================================
+    # ベース色が同じで、今表示している配色とは別のものをcolpama.dbから探す
+    # ======================================
+    def get_other_base_matches(self, base_hex, exclude_id):
+
+        self. cursor. execute("""
+            SELECT id, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct
+            FROM presets
+            WHERE base_hex = ? AND id != ?
+        """, (base_hex, exclude_id))
+
+        return self. cursor. fetchall()
+
+
+    # ======================================
+    # 「メインカラーに合うほかのカラーを見てみる」ボタンの処理
+    # ======================================
+    def on_other_base_go(self):
+
+        if not self. other_base_matches:
+            return
+
+        new_row = random. choice(self. other_base_matches)
+        self. render_select_result(new_row)
 
 
     # ======================================
@@ -1412,6 +1563,155 @@ class App(ctk. CTk):
 
         self. scroll. pack_forget()
         self. select_result_frame. pack(fill = "both", expand = True)
+
+
+    # ======================================
+    # セレクトのGO!結果画面：戻るボタンの処理(セレクトしていた画面に戻す)
+    # ======================================
+    def close_select_result(self):
+
+        self. select_result_frame. pack_forget()
+        self. scroll. pack(fill = "both", expand = True)
+        self. scroll_select()
+
+
+    # ======================================
+    # セレクトのGO!結果画面：3色プレビュー＋比率バーをスクショ保存する
+    # ======================================
+    def screenshot_select_result(self):
+
+        self. update()
+
+        x = min(self. circle_row. winfo_rootx(), self. result_bar_frame. winfo_rootx())
+        y = self. circle_row. winfo_rooty()
+
+        right = max(
+            self. circle_row. winfo_rootx() + self. circle_row. winfo_width(),
+            self. result_bar_frame. winfo_rootx() + self. result_bar_frame. winfo_width()
+        )
+        bottom = self. result_bar_frame. winfo_rooty() + self. result_bar_frame. winfo_height()
+
+        screenshot = ImageGrab. grab(bbox = (x, y, right, bottom), all_screens = True)
+
+        file_path = filedialog. asksaveasfilename(
+            defaultextension = ".png",
+            filetypes = [("PNG画像", "*.png")],
+            initialfile = "recommend.png"
+        )
+
+        if file_path:
+            screenshot. save(file_path)
+
+
+    # ======================================
+    # セレクトのGO!結果画面：今表示している3色を、選択中のプリセット枠に登録する
+    # ======================================
+    def register_result_to_preset(self):
+
+        # 開いているタブではなく、空いている一番若い番号のスロットに登録する
+        target_index = None
+
+        for i, data in enumerate(self. preset_data):
+            if data["colors"] is None:
+                target_index = i
+                break
+
+        if target_index is None:
+            self. show_toast("プリセットに空きがないため登録できません")
+            return
+
+        colors = [
+            self. result_circles["base"]. cget("fg_color"),
+            self. result_circles["accent"]. cget("fg_color"),
+            self. result_circles["sub"]. cget("fg_color"),
+        ]
+
+        self. preset_data[target_index]["colors"] = colors
+
+        self. save_preset_slot(target_index)
+        self. render_preset_page()
+
+        self. show_toast(f"プリセット {target_index + 1} に登録しました")
+
+
+    # ======================================
+    # プリセット：1枠分のデータをcolpama.dbに保存する(アプリを閉じても残るように)
+    # ======================================
+    def save_preset_slot(self, index):
+
+        data = self. preset_data[index]
+
+        if data["colors"] is None:
+            self. cursor. execute("DELETE FROM my_preset_slots WHERE slot = ?", (index,))
+        else:
+            self. cursor. execute("""
+                INSERT INTO my_preset_slots (slot, name, base_hex, accent_hex, sub_hex)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(slot) DO UPDATE SET
+                    name = excluded. name,
+                    base_hex = excluded. base_hex,
+                    accent_hex = excluded. accent_hex,
+                    sub_hex = excluded. sub_hex
+            """, (index, data["name"], data["colors"][0], data["colors"][1], data["colors"][2]))
+
+        self. conn. commit()
+
+
+    # ======================================
+    # 画面中央に大きくメッセージを出し、2秒待ってからフェードアウトする通知
+    # ======================================
+    def show_toast(self, message):
+
+        toast = tk. Toplevel(self)
+        toast. wm_overrideredirect(True)
+        toast. attributes("-topmost", True)
+
+        # 角丸の外側(四隅)を透過させる。対応していない環境ではそのまま単色の背景になる
+        transparent_key = "#123456"
+        is_transparent = True
+
+        try:
+            toast. configure(bg = transparent_key)
+            toast. attributes("-transparentcolor", transparent_key)
+        except tk. TclError:
+            is_transparent = False
+
+        label_kwargs = dict(
+            text = message,
+            font = ("マメロン 5 Hi Regular", 16, "bold"),
+            fg_color = "#ff6f9f",
+            text_color = "white",
+            corner_radius = 20,
+            width = 260,
+            height = 70
+        )
+
+        if is_transparent:
+            label_kwargs["bg_color"] = transparent_key
+
+        label = ctk. CTkLabel(toast, **label_kwargs)
+        label. pack(padx = 4, pady = 4)
+
+        toast. update_idletasks()
+
+        w = toast. winfo_width()
+        h = toast. winfo_height()
+
+        x = self. winfo_rootx() + (self. winfo_width() - w) // 2
+        y = self. winfo_rooty() + (self. winfo_height() - h) // 2
+
+        toast. wm_geometry(f"+{x}+{y}")
+        toast. attributes("-alpha", 1.0)
+
+        def fade(opacity = 1.0):
+            if opacity <= 0:
+                toast. destroy()
+                return
+
+            toast. attributes("-alpha", opacity)
+            toast. after(50, lambda: fade(opacity - 0.1))
+
+        toast. after(2000, fade)
 
 
     # ======================================
@@ -1544,8 +1844,8 @@ class App(ctk. CTk):
 
         data = self. preset_data[self. current_preset_page]
 
-        # 登録済みならその色、まだなら仮の3色(候補)を表示
-        colors = data["colors"] if data["colors"] is not None else self. dummy_palette
+        # 登録済みならその色、まだ登録されていなければ空(仮の色は出さない)
+        colors = data["colors"] if data["colors"] is not None else []
 
         # ------------------------------------
         # 上段：📷 スクショボタン ＋ 🗑️ 削除ボタン(右寄せ)
@@ -1583,7 +1883,7 @@ class App(ctk. CTk):
         )
         camera_btn. pack(side = "right")
 
-        ToolTip(camera_btn, "スクショを撮る")
+        ToolTip(camera_btn, "スクショ保存")
 
         # ------------------------------------
         # 名前欄 ＋ ✏️ 登録ボタン
@@ -1601,6 +1901,7 @@ class App(ctk. CTk):
         self. preset_name_entry = ctk. CTkEntry(
             name_row,
             width = 150,
+            font = ("マメロン 5 Hi Regular", 14),
             placeholder_text = "NoTitle",
             placeholder_text_color = "#dddddd"
         )
@@ -1679,16 +1980,16 @@ class App(ctk. CTk):
 
 
     # ======================================
-    # プリセット：名前と(仮の)3色を現在のページに登録する
+    # プリセット：名前だけを現在のページに登録する(3色は📚ボタンから登録されたものをそのまま残す)
     # ======================================
     def register_current_preset(self):
 
         name = self. preset_name_entry. get(). strip()
 
-        self. preset_data[self. current_preset_page] = {
-            "colors": list(self. dummy_palette),
-            "name": name
-        }
+        self. preset_data[self. current_preset_page]["name"] = name
+
+        if self. preset_data[self. current_preset_page]["colors"] is not None:
+            self. save_preset_slot(self. current_preset_page)
 
         self. render_preset_page()
 
@@ -1699,6 +2000,7 @@ class App(ctk. CTk):
     def delete_current_preset(self):
 
         self. preset_data[self. current_preset_page] = {"colors": None, "name": ""}
+        self. save_preset_slot(self. current_preset_page)
         self. render_preset_page()
 
 
