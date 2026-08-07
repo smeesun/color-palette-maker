@@ -58,7 +58,8 @@ class ToolTip:
 
 
 # ======================================
-# タググループ(既存選択肢＋その他＋新規追加、新規分は4個ごとに折り返す)
+# タググループ(既存選択肢→新規追加タグの順に並び、画面幅にあわせて折り返す。
+# 「その他」「新規」欄はこの下に位置を固定して表示する)
 # ======================================
 class TagGroup:
 
@@ -66,8 +67,12 @@ class TagGroup:
 
         self. selected = []
         self. buttons = {}
+        self. button_order = []   # 表示順(「その他」は含めない。常にこのリストの後ろに足していく)
         self. font_name = font_name
         self. on_new_tag = on_new_tag
+        self. row_frames = []
+        self. text_widths = {}    # ボタンごとの実際の必要幅(文字列単位でキャッシュ)
+        self. current_layout_key = None
 
         ctk. CTkLabel(
             parent,
@@ -77,17 +82,26 @@ class TagGroup:
         ). pack(anchor = "w", padx = 15, pady = (6, 2))
 
         # ------------------------------------
-        # 1段目：既存の選択肢＋その他＋新規入力欄(常に折り返さない)
+        # ボタン置き場(既存の選択肢→新規タグの順。画面幅にあわせて折り返す)
+        # 「その他」と「新規」欄はここには含めず、この下に位置を固定して表示する
         # ------------------------------------
-        self. header_row = ctk. CTkFrame(parent, fg_color = "transparent")
-        self. header_row. pack(anchor = "w", padx = 15, pady = (0, 2))
+        self. flow_area = ctk. CTkFrame(parent, fg_color = "transparent")
+        self. flow_area. pack(anchor = "w", fill = "x", padx = 15, pady = (0, 2))
 
-        for option in options:
-            self. add_button(self. header_row, option)
+        self. button_order = list(options)
 
-        # 「その他」固定ボタン
-        self. other_btn = ctk. CTkButton(
-            self. header_row,
+        # ------------------------------------
+        # 「その他」＋「新規」入力欄(この2つは常にセットで、位置を固定する)
+        # 「その他」は常に同じ場所に留まり、この2つを並べる幅が無い時だけ
+        # 「新規」欄がその下の行に送られる
+        # ------------------------------------
+        self. fixed_area = ctk. CTkFrame(parent, fg_color = "transparent")
+        # fill="x"を付けないと、中身(その他ボタンだけ)にあわせて幅が縮んでしまい、
+        # 折り返し判定に使う幅が常に「その他ボタン1個ぶん」になってしまう
+        self. fixed_area. pack(anchor = "w", fill = "x", padx = 15, pady = (0, 2))
+
+        self. other_button = ctk. CTkButton(
+            self. fixed_area,
             text = "その他",
             width = 56,
             height = 26,
@@ -98,64 +112,181 @@ class TagGroup:
             font = (font_name, 12),
             command = lambda: self. select("その他")
         )
-        self. other_btn. pack(side = "left", padx = 4)
-        self. buttons["その他"] = self. other_btn
+        self. buttons["その他"] = self. other_button
 
-        # 「新規」入力欄(常に一番右端)
         self. new_entry = ctk. CTkEntry(
-            self. header_row,
+            self. fixed_area,
             width = 56,
             height = 26,
             placeholder_text = "新規",
             placeholder_text_color = "#dddddd"
         )
-        self. new_entry. pack(side = "left", padx = 4)
 
-        # ------------------------------------
-        # 2段目以降：新規タグ専用エリア(4個ごとに折り返す)
-        # ------------------------------------
-        self. new_tags_area = ctk. CTkFrame(parent, fg_color = "transparent", height = 150)
-        self. new_tags_area. pack(anchor = "w", padx = 15, pady = (0, 2))
+        self. fixed_row_together = None   # Noneなら初回なので必ず配置する
 
-        self. new_tag_count = 0
-        self. current_new_row = None
+        # ウィンドウのConfigureをきっかけに、レイアウトが落ち着いた後(after_idle)に
+        # 実際の幅を測って折り返す
+        self. toplevel = parent. winfo_toplevel()
+        self. toplevel. bind("<Configure>", lambda _e: self. flow_area. after_idle(self. on_resize), add = "+")
 
-
-    # ======================================
-    # ボタンを1つ作って、指定した行(parent_row)に配置する
-    # ======================================
-    def add_button(self, parent_row, text):
-
-        btn = ctk. CTkButton(
-            parent_row,
-            text = text,
-            width = 56,
-            height = 26,
-            corner_radius = 50,
-            fg_color = "#e6a5f8",
-            hover_color = "#866091",
-            text_color = "white",
-            font = (self. font_name, 12),
-            command = lambda o = text: self. select(o)
-        )
-        btn. pack(side = "left", padx = 4)
-
-        self. buttons[text] = btn
-
-        return btn
+        self. on_resize()
 
 
     # ======================================
-    # 新規タグを1つ追加する(4個たまるごとに新しい行を作る)
+    # ウィンドウサイズが変わった時(起動直後も含む)にまとめて呼ぶ
+    # ======================================
+    def on_resize(self):
+
+        self. relayout()
+        self. relayout_fixed_row()
+
+
+    # ======================================
+    # 「その他」「新規」欄の位置を決める。どちらも作り直さず位置(grid)だけ
+    # 変えるので、新規欄に入力中の文字が消えることはない
+    # ======================================
+    def relayout_fixed_row(self, available_width = None):
+
+        if available_width is None:
+            available_width = self. fixed_area. winfo_width()
+
+        if available_width <= 1:
+            available_width = 10000
+
+        edge_margin = 30
+        gap = 8   # 左右padx(4px×2)ぶん
+        other_width = self. other_button. winfo_reqwidth() + gap
+        entry_width = 56 + gap
+
+        fits_together = (other_width + entry_width) <= (available_width - edge_margin)
+
+        if fits_together == self. fixed_row_together:
+            return
+
+        self. fixed_row_together = fits_together
+
+        self. other_button. grid(row = 0, column = 0, padx = 4, pady = (0, 3), sticky = "w")
+
+        if fits_together:
+            self. new_entry. grid(row = 0, column = 1, padx = 4, pady = (0, 3), sticky = "w")
+        else:
+            self. new_entry. grid(row = 1, column = 0, padx = 4, pady = (0, 3), sticky = "w")
+
+
+    # ======================================
+    # ボタン1個ぶんの実際に必要な幅(表示スケーリング・文字数込み)を測る。
+    # ダミーをそのテキストで1つ描画してすぐ消すことで、実際にpackされるボタンと
+    # 同じ幅を取得する(width=56は最小値であって、長い文字列(例:クリーミー)は
+    # それより広がる。テキストの長さごとに必要な幅は違うので、決め打ちの1つの
+    # 数値では長いボタンが欠けたり、短いボタンの後ろに不自然な余白ができたりする)
+    # ======================================
+    def measure_text_width(self, text):
+
+        if text not in self. text_widths:
+            probe = ctk. CTkButton(
+                self. flow_area,
+                text = text,
+                width = 56,
+                height = 26,
+                corner_radius = 50,
+                font = (self. font_name, 12)
+            )
+            probe. update_idletasks()
+
+            self. text_widths[text] = probe. winfo_reqwidth() + 8   # 左右padx(4px×2)ぶん
+
+            probe. destroy()
+
+        return self. text_widths[text]
+
+
+    # ======================================
+    # 新規タグを1つ追加する(既存タグの末尾に入る。「その他」は含めない)
     # ======================================
     def add_new_tag_button(self, text):
 
-        if self. new_tag_count % 4 == 0:
-            self. current_new_row = ctk. CTkFrame(self. new_tags_area, fg_color = "transparent")
-            self. current_new_row. pack(anchor = "w", pady = (0, 2))
+        if text not in self. buttons and text not in self. button_order:
+            self. button_order. append(text)
+            self. relayout()
 
-        self. add_button(self. current_new_row, text)
-        self. new_tag_count += 1
+
+    # ======================================
+    # 画面幅にあわせて、既存の選択肢→新規タグの順でボタンを作り直す
+    # (行フレームごと作り直すので、選択中の色は選択状態を見て復元する)
+    # 「その他」「新規」欄はここには含まない(fixed_areaで別途固定表示する)
+    #
+    # ボタンの横幅は伸び縮みさせず、常にそのテキストが全部見える幅を確保する。
+    # その幅ぶんの空きが今の行に無ければ、無理に詰め込まず次の行に送る
+    # (箱の残りが70cmに満たなければ70cmのスイカは入れない、というのと同じ考え方)
+    #
+    # 直前と幅(大まかな区切り)・ボタン構成のどちらも変わっていなければ何もしない。
+    # これが無いと、ここで行フレームを作り直すこと自体がConfigureイベントを再度
+    # 呼び、無限ループ(RecursionError)になってしまう
+    # ======================================
+    def relayout(self, available_width = None):
+
+        if available_width is None:
+            available_width = self. flow_area. winfo_width()
+
+        if available_width <= 1:
+            # まだ描画前で幅が取れない場合は1行にまとめておく(直後のConfigureイベントで直る)
+            available_width = 10000
+
+        display_order = self. button_order
+
+        # 少しの揺れで作り直しが起きないよう、幅は大まかな区切りで比較する
+        width_bucket = int(available_width) // 20
+        layout_key = (width_bucket, tuple(display_order))
+
+        if layout_key == self. current_layout_key:
+            return
+
+        self. current_layout_key = layout_key
+
+        # ボタンとアプリの縁の間に余白を残しておく(ぴったりで計算すると
+        # 最後のボタンが縁からはみ出して欠けて見えることがあるため)
+        edge_margin = 30
+        row_budget = available_width - edge_margin
+        gap = 8   # 左右padx(4px×2)ぶん
+
+        for row in self. row_frames:
+            row. destroy()
+        self. row_frames = []
+
+        # 「その他」はfixed_area側の固定ボタンなので、ここでは消さずに残す
+        self. buttons = {"その他": self. buttons["その他"]} if "その他" in self. buttons else {}
+
+        current_row = None
+        current_row_width = 0
+
+        for text in display_order:
+            needed = self. measure_text_width(text) + gap
+
+            # 今の行の残りに収まらないなら、次の行に送る(ボタン自体は縮めない)
+            if current_row is None or current_row_width + needed > row_budget:
+                current_row = ctk. CTkFrame(self. flow_area, fg_color = "transparent")
+                current_row. pack(anchor = "w", pady = (0, 3))
+                self. row_frames. append(current_row)
+                current_row_width = 0
+
+            is_selected = text in self. selected
+
+            btn = ctk. CTkButton(
+                current_row,
+                text = text,
+                width = 56,
+                height = 26,
+                corner_radius = 50,
+                fg_color = "#ff6f9f" if is_selected else "#e6a5f8",
+                hover_color = "#ff6f9f" if is_selected else "#866091",
+                text_color = "white",
+                font = (self. font_name, 12),
+                command = lambda o = text: self. select(o)
+            )
+            btn. pack(side = "left", padx = 4)
+
+            self. buttons[text] = btn
+            current_row_width += needed
 
 
     def select(self, option):

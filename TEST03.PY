@@ -76,13 +76,14 @@ class ToolTip:
 # ======================================
 class SingleSelectGroup:
 
-    def __init__(self, parent, title, options, font_name="ふてほど丸ゴシック", on_change=None):
+    def __init__(self, parent, title, options, font_name="ふてほど丸ゴシック", on_change=None, display_labels=None):
 
         self. selected = None
         self. buttons = {}
         self. disabled_options = set()
         self. on_change = on_change
         self. font_name = font_name
+        self. display_labels = display_labels or {}
 
         ctk. CTkLabel(
             parent,
@@ -91,38 +92,75 @@ class SingleSelectGroup:
             text_color = "#555555"
         ). pack(anchor = "w", padx = 15, pady = (15, 5))
 
-        # 4個ごとに折り返す(1行に詰め込みすぎるとボタンがウィンドウ幅からはみ出るため、
-        # カスタムタグ専用エリアと同じ「4個ごとに改行」のルールで並べる)
-        option_row = None
+        # ------------------------------------
+        # 固定の選択肢(4個ごとに折り返す。1行に詰め込みすぎるとボタンが
+        # ウィンドウ幅からはみ出るため)
+        # ------------------------------------
+        self. option_area = ctk. CTkFrame(parent, fg_color = "transparent")
+        self. option_area. pack(anchor = "w", padx = 15, pady = (0, 3))
 
-        for i, option in enumerate(options):
-            if i % 4 == 0:
-                option_row = ctk. CTkFrame(parent, fg_color = "transparent")
-                option_row. pack(anchor = "w", padx = 15, pady = (0, 3))
+        self. option_count = 0
+        self. current_option_row = None
 
-            btn = ctk. CTkButton(
-                option_row,
-                text = option,
-                width = 64,
-                corner_radius = 50,
-                fg_color = "#e6a5f8",
-                hover_color = "#866091",
-                text_color = "white",
-                font = (font_name, 13),
-                command = lambda o = option: self. select(o)
-            )
-            btn. pack(side = "left", padx = 3)
-
-            self. buttons[option] = btn
+        for option in options:
+            self. add_option_button(option)
 
         # ------------------------------------
         # データ登録ツール側で追加されたカスタムタグ専用エリア(4個ごとに折り返す)
+        # カスタムタグが1つも無いカテゴリだと中身が空のままになるが、CTkFrameは
+        # width/height未指定だと空でも200×200pxのデフォルトサイズを確保してしまうため、
+        # 明示的にheightを指定しておく(中身が増えれば自動で広がる)
         # ------------------------------------
-        self. extra_area = ctk. CTkFrame(parent, fg_color = "transparent")
-        self. extra_area. pack(anchor = "w", padx = 15, pady = (0, 5))
+        self. extra_area = ctk. CTkFrame(parent, fg_color = "transparent", height = 1)
+        self. extra_area. pack(anchor = "w", padx = 15, pady = (0, 3))
 
         self. extra_count = 0
         self. current_extra_row = None
+
+        # ------------------------------------
+        # 「その他」はカスタムタグより後ろ、常に一番最後に来るように別枠にする
+        # ------------------------------------
+        self. other_area = ctk. CTkFrame(parent, fg_color = "transparent")
+        self. other_area. pack(anchor = "w", padx = 15, pady = (0, 5))
+
+        self. add_button(self. other_area, "その他")
+
+
+    # ======================================
+    # ボタンを1つ作って、指定した行(parent_row)に配置する
+    # 表示ラベルはdisplay_labelsに指定があればそちらを使う(選択される値は常にoption)
+    # ======================================
+    def add_button(self, parent_row, option):
+
+        btn = ctk. CTkButton(
+            parent_row,
+            text = self. display_labels. get(option, option),
+            width = 64,
+            corner_radius = 50,
+            fg_color = "#e6a5f8",
+            hover_color = "#866091",
+            text_color = "white",
+            font = (self. font_name, 13),
+            command = lambda o = option: self. select(o)
+        )
+        btn. pack(side = "left", padx = 3)
+
+        self. buttons[option] = btn
+
+        return btn
+
+
+    # ======================================
+    # 固定の選択肢を1つ追加する(4個ごとに折り返す)
+    # ======================================
+    def add_option_button(self, option):
+
+        if self. option_count % 4 == 0:
+            self. current_option_row = ctk. CTkFrame(self. option_area, fg_color = "transparent")
+            self. current_option_row. pack(anchor = "w", pady = (0, 3))
+
+        self. add_button(self. current_option_row, option)
+        self. option_count += 1
 
 
     # ======================================
@@ -137,20 +175,7 @@ class SingleSelectGroup:
             self. current_extra_row = ctk. CTkFrame(self. extra_area, fg_color = "transparent")
             self. current_extra_row. pack(anchor = "w", pady = (0, 3))
 
-        btn = ctk. CTkButton(
-            self. current_extra_row,
-            text = text,
-            width = 64,
-            corner_radius = 50,
-            fg_color = "#e6a5f8",
-            hover_color = "#866091",
-            text_color = "white",
-            font = (self. font_name, 13),
-            command = lambda o = text: self. select(o)
-        )
-        btn. pack(side = "left", padx = 3)
-
-        self. buttons[text] = btn
+        self. add_button(self. current_extra_row, text)
         self. extra_count += 1
 
 
@@ -874,29 +899,34 @@ class App(ctk. CTk):
         self. image_group = SingleSelectGroup(
             self. category_frame,
             title = "イメージ",
-            options = ["ビビッド", "ネオン", "くすみ", "パステル", "ポップ", "ナチュラル", "クール", "エレガント", "アース", "ヴィンテージ", "その他"],
+            options = ["ビビッド", "ネオン", "くすみ", "パステル", "ポップ", "ナチュラル", "クール", "エレガント", "アース", "ヴィンテージ"],
             on_change = self. refresh_category_filters
         )
 
         self. season_group = SingleSelectGroup(
             self. category_frame,
             title = "季節",
-            options = ["春", "夏", "秋", "冬", "その他"],
+            options = ["春", "夏", "秋", "冬"],
             on_change = self. refresh_category_filters
         )
 
         self. era_group = SingleSelectGroup(
             self. category_frame,
             title = "年代",
-            options = ["70's", "80's", "90's", "00's", "その他"],
+            options = ["70's", "80's", "90's", "00's"],
             on_change = self. refresh_category_filters
         )
 
         self. region_group = SingleSelectGroup(
             self. category_frame,
             title = "地域",
-            options = ["南米・メキシコ", "北欧", "地中海", "アフリカン", "中東・モロッコ", "東アジア", "南国・トロピカル", "その他"],
-            on_change = self. refresh_category_filters
+            options = ["南米・メキシコ", "北欧", "地中海", "アフリカン", "中東・モロッコ", "東アジア", "南国・トロピカル"],
+            on_change = self. refresh_category_filters,
+            display_labels = {
+                "南米・メキシコ": "南米",
+                "中東・モロッコ": "中東",
+                "南国・トロピカル": "南国",
+            }
         )
 
         # データ登録ツールで追加されたカスタムタグを、同じ内容で下に復元する
@@ -1819,12 +1849,15 @@ class App(ctk. CTk):
             group. enable_all()
             return
 
+        # 選択解除を先に行う。グレーアウトより後にやると、選択解除時の「普通の紫色」への
+        # 戻し処理が、直後のグレーアウト表示を上書きしてしまう(ボタンの色は紫のまま
+        # 文字だけグレーになる)ため、必ずこの順番にする
+        if group. selected is not None and group. selected != "その他" and group. selected not in allowed_tags:
+            group. clear_selection()
+
         for option in group. buttons:
             enabled = (option == "その他") or (option in allowed_tags)
             group. set_enabled(option, enabled)
-
-        if group. selected is not None and group. selected != "その他" and group. selected not in allowed_tags:
-            group. clear_selection()
 
 
     # ======================================
