@@ -259,7 +259,7 @@ class DataEntryApp(ctk. CTk):
             )
         """)
 
-        # カテゴリ(トーン/年代/季節)で「新規」欄から追加したタグを保存しておくテーブル
+        # カテゴリ(イメージ/季節/年代/地域)で「新規」欄から追加したタグを保存しておくテーブル
         # これが無いとアプリを再起動した時に追加したタグのボタンが消えてしまう
         self. cursor. execute("""
             CREATE TABLE IF NOT EXISTS custom_tags (
@@ -271,13 +271,25 @@ class DataEntryApp(ctk. CTk):
         """)
         self. conn. commit()
 
+        # 既存のcolpama.dbにregion_tags列が無ければ追加する(カテゴリに「地域」を追加した際の移行措置)
+        self. cursor. execute("PRAGMA table_info(presets)")
+        existing_columns = {row[1] for row in self. cursor. fetchall()}
+
+        if "region_tags" not in existing_columns:
+            self. cursor. execute("ALTER TABLE presets ADD COLUMN region_tags TEXT")
+            self. conn. commit()
+
+        # 過去に「トーン」という名前で保存されたカスタムタグを「イメージ」に付け替える(カテゴリ名変更に伴う移行措置)
+        self. cursor. execute("UPDATE custom_tags SET group_name = 'イメージ' WHERE group_name = 'トーン'")
+        self. conn. commit()
+
         self. registered_count = self. get_current_count()
 
         # ------------------------------------
         # 編集モード用の状態(データ一覧の行クリックで編集開始した時に使う)
         # ------------------------------------
         self. editing_id = None
-        self. editing_extra_tags = {"tone": [], "era": [], "season": []}
+        self. editing_extra_tags = {"image": [], "season": [], "era": [], "region": []}
 
         # ------------------------------------
         # データ一覧用の状態
@@ -330,23 +342,30 @@ class DataEntryApp(ctk. CTk):
         self. build_color_row("sub", "サブ", 20)
 
         # タグ選択
-        self. tone_group = TagGroup(
-            self. scroll, "トーン", ["ビビッド", "ネオン", "くすみ", "パステル"],
-            on_new_tag = lambda tag: self. save_custom_tag("トーン", tag)
-        )
-        self. era_group = TagGroup(
-            self. scroll, "年代", ["70's", "80's", "90's", "00's"],
-            on_new_tag = lambda tag: self. save_custom_tag("年代", tag)
+        self. image_group = TagGroup(
+            self. scroll, "イメージ",
+            ["ビビッド", "ネオン", "くすみ", "パステル", "ポップ", "ナチュラル", "クール", "エレガント", "アース", "ヴィンテージ"],
+            on_new_tag = lambda tag: self. save_custom_tag("イメージ", tag)
         )
         self. season_group = TagGroup(
             self. scroll, "季節", ["春", "夏", "秋", "冬"],
             on_new_tag = lambda tag: self. save_custom_tag("季節", tag)
         )
+        self. era_group = TagGroup(
+            self. scroll, "年代", ["70's", "80's", "90's", "00's"],
+            on_new_tag = lambda tag: self. save_custom_tag("年代", tag)
+        )
+        self. region_group = TagGroup(
+            self. scroll, "地域",
+            ["南米・メキシコ", "北欧", "地中海", "アフリカン", "中東・モロッコ", "東アジア", "南国・トロピカル"],
+            on_new_tag = lambda tag: self. save_custom_tag("地域", tag)
+        )
 
         # 前回までに追加された新規タグを復元する(保存はここではしない)
-        self. restore_custom_tags(self. tone_group, "トーン")
-        self. restore_custom_tags(self. era_group, "年代")
+        self. restore_custom_tags(self. image_group, "イメージ")
         self. restore_custom_tags(self. season_group, "季節")
+        self. restore_custom_tags(self. era_group, "年代")
+        self. restore_custom_tags(self. region_group, "地域")
 
         # 登録ボタン
         self. register_btn = ctk. CTkButton(
@@ -618,34 +637,40 @@ class DataEntryApp(ctk. CTk):
         sub_pct = self. get_pct("sub")
 
         # 新規タグがあればボタン化してから、実際に使うタグ名をカテゴリ別に取得
-        tone_selected = self. tone_group. apply_new_tag_if_any()
-        era_selected = self. era_group. apply_new_tag_if_any()
+        image_selected = self. image_group. apply_new_tag_if_any()
         season_selected = self. season_group. apply_new_tag_if_any()
+        era_selected = self. era_group. apply_new_tag_if_any()
+        region_selected = self. region_group. apply_new_tag_if_any()
 
         # 編集中の場合、元々付いていたが今のグループには存在しないタグを、同じカテゴリのまま保持しておく
         if self. editing_id is not None:
-            for tag in self. editing_extra_tags["tone"]:
-                if tag not in tone_selected:
-                    tone_selected. append(tag)
-
-            for tag in self. editing_extra_tags["era"]:
-                if tag not in era_selected:
-                    era_selected. append(tag)
+            for tag in self. editing_extra_tags["image"]:
+                if tag not in image_selected:
+                    image_selected. append(tag)
 
             for tag in self. editing_extra_tags["season"]:
                 if tag not in season_selected:
                     season_selected. append(tag)
 
-        tone_tags = ",". join(tone_selected)
+            for tag in self. editing_extra_tags["era"]:
+                if tag not in era_selected:
+                    era_selected. append(tag)
+
+            for tag in self. editing_extra_tags["region"]:
+                if tag not in region_selected:
+                    region_selected. append(tag)
+
+        tone_tags = ",". join(image_selected)
         era_tags = ",". join(era_selected)
         season_tags = ",". join(season_selected)
+        region_tags = ",". join(region_selected)
 
         if self. editing_id is None:
             # 新規登録
             self. cursor. execute("""
-                INSERT INTO presets (name, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct, tone_tags, era_tags, season_tags)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (name, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct, tone_tags, era_tags, season_tags))
+                INSERT INTO presets (name, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct, tone_tags, era_tags, season_tags, region_tags)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (name, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct, tone_tags, era_tags, season_tags, region_tags))
 
             self. conn. commit()
 
@@ -656,9 +681,9 @@ class DataEntryApp(ctk. CTk):
             self. cursor. execute("""
                 UPDATE presets
                 SET base_hex = ?, base_pct = ?, accent_hex = ?, accent_pct = ?, sub_hex = ?, sub_pct = ?,
-                    tone_tags = ?, era_tags = ?, season_tags = ?
+                    tone_tags = ?, era_tags = ?, season_tags = ?, region_tags = ?
                 WHERE id = ?
-            """, (base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct, tone_tags, era_tags, season_tags, self. editing_id))
+            """, (base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct, tone_tags, era_tags, season_tags, region_tags, self. editing_id))
 
             self. conn. commit()
 
@@ -677,13 +702,14 @@ class DataEntryApp(ctk. CTk):
             self. color_widgets[key]["preview"]. configure(fg_color = "#FFFFFF")
             self. color_widgets[key]["override_entry"]. delete(0, "end")
 
-        self. tone_group. reset()
-        self. era_group. reset()
+        self. image_group. reset()
         self. season_group. reset()
+        self. era_group. reset()
+        self. region_group. reset()
 
         # 編集モードだったら解除して、新規登録用の表示に戻す
         self. editing_id = None
-        self. editing_extra_tags = {"tone": [], "era": [], "season": []}
+        self. editing_extra_tags = {"image": [], "season": [], "era": [], "region": []}
         self. edit_status_label. configure(text = "")
         self. cancel_edit_btn. pack_forget()
         self. register_btn. configure(text = "この配色を登録")
@@ -721,18 +747,20 @@ class DataEntryApp(ctk. CTk):
             override_entry. delete(0, "end")
             override_entry. insert(0, str(pct))
 
-        self. tone_group. reset()
-        self. era_group. reset()
+        self. image_group. reset()
         self. season_group. reset()
+        self. era_group. reset()
+        self. region_group. reset()
 
         # カテゴリごとの列をそれぞれのグループに振り分ける。ボタンが無いタグ(古いカスタムタグなど)は
         # editing_extra_tags に退避しておき、更新登録の時に同じカテゴリのまま付け直す
-        self. editing_extra_tags = {"tone": [], "era": [], "season": []}
+        self. editing_extra_tags = {"image": [], "season": [], "era": [], "region": []}
 
         for extra_key, group, column in (
-            ("tone", self. tone_group, "tone_tags"),
-            ("era", self. era_group, "era_tags"),
+            ("image", self. image_group, "tone_tags"),
             ("season", self. season_group, "season_tags"),
+            ("era", self. era_group, "era_tags"),
+            ("region", self. region_group, "region_tags"),
         ):
             tags = [t for t in (row[column] or ""). split(",") if t]
 
@@ -882,9 +910,10 @@ class DataEntryApp(ctk. CTk):
             ("accent_pct", "アクセント%", 80),
             ("sub", "サブ", 110),
             ("sub_pct", "サブ%", 65),
-            ("tone_tags", "トーン", 130),
-            ("era_tags", "年代", 100),
+            ("tone_tags", "イメージ", 130),
             ("season_tags", "季節", 100),
+            ("era_tags", "年代", 100),
+            ("region_tags", "地域", 130),
         ]
 
         # ------------------------------------
@@ -927,7 +956,7 @@ class DataEntryApp(ctk. CTk):
 
         self. cursor. execute("""
             SELECT id, name, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct,
-                   tone_tags, era_tags, season_tags
+                   tone_tags, era_tags, season_tags, region_tags
             FROM presets
             ORDER BY id ASC
         """)
@@ -948,6 +977,7 @@ class DataEntryApp(ctk. CTk):
                 "tone_tags": r[8],
                 "era_tags": r[9],
                 "season_tags": r[10],
+                "region_tags": r[11],
             }
             for i, r in enumerate(rows)
         ]
@@ -1095,7 +1125,7 @@ class DataEntryApp(ctk. CTk):
         self. build_color_cell(content_frame, row["sub_hex"], 110)
         self. build_pct_cell(content_frame, row["sub_pct"], 65)
 
-        for column, width in (("tone_tags", 130), ("era_tags", 100), ("season_tags", 100)):
+        for column, width in (("tone_tags", 130), ("season_tags", 100), ("era_tags", 100), ("region_tags", 130)):
             ctk. CTkLabel(
                 content_frame,
                 text = row[column] or "",

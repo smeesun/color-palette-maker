@@ -301,6 +301,18 @@ class App(ctk. CTk):
         """)
         self. conn. commit()
 
+        # 既存のcolpama.dbにregion_tags列が無ければ追加する(カテゴリに「地域」を追加した際の移行措置)
+        self. cursor. execute("PRAGMA table_info(presets)")
+        existing_columns = {row[1] for row in self. cursor. fetchall()}
+
+        if "region_tags" not in existing_columns:
+            self. cursor. execute("ALTER TABLE presets ADD COLUMN region_tags TEXT")
+            self. conn. commit()
+
+        # 過去に「トーン」という名前で保存されたカスタムタグを「イメージ」に付け替える(カテゴリ名変更に伴う移行措置)
+        self. cursor. execute("UPDATE custom_tags SET group_name = 'イメージ' WHERE group_name = 'トーン'")
+        self. conn. commit()
+
 
         # ======================================
         # ヘッダー（固定）
@@ -859,17 +871,10 @@ class App(ctk. CTk):
         # ------------------------------------
         # カテゴリ選択グループ
         # ------------------------------------
-        self. tone_group = SingleSelectGroup(
+        self. image_group = SingleSelectGroup(
             self. category_frame,
-            title = "トーン",
-            options = ["ビビッド", "ネオン", "くすみ", "パステル", "その他"],
-            on_change = self. refresh_category_filters
-        )
-
-        self. era_group = SingleSelectGroup(
-            self. category_frame,
-            title = "年代",
-            options = ["70's", "80's", "90's", "00's", "その他"],
+            title = "イメージ",
+            options = ["ビビッド", "ネオン", "くすみ", "パステル", "ポップ", "ナチュラル", "クール", "エレガント", "アース", "ヴィンテージ", "その他"],
             on_change = self. refresh_category_filters
         )
 
@@ -880,10 +885,25 @@ class App(ctk. CTk):
             on_change = self. refresh_category_filters
         )
 
+        self. era_group = SingleSelectGroup(
+            self. category_frame,
+            title = "年代",
+            options = ["70's", "80's", "90's", "00's", "その他"],
+            on_change = self. refresh_category_filters
+        )
+
+        self. region_group = SingleSelectGroup(
+            self. category_frame,
+            title = "地域",
+            options = ["南米・メキシコ", "北欧", "地中海", "アフリカン", "中東・モロッコ", "東アジア", "南国・トロピカル", "その他"],
+            on_change = self. refresh_category_filters
+        )
+
         # データ登録ツールで追加されたカスタムタグを、同じ内容で下に復元する
-        self. load_custom_category_tags(self. tone_group, "トーン")
-        self. load_custom_category_tags(self. era_group, "年代")
+        self. load_custom_category_tags(self. image_group, "イメージ")
         self. load_custom_category_tags(self. season_group, "季節")
+        self. load_custom_category_tags(self. era_group, "年代")
+        self. load_custom_category_tags(self. region_group, "地域")
 
         # 起動直後は何も選ばれていないので、この時点では全ボタンが有効なままになる
         self. refresh_category_filters()
@@ -1738,43 +1758,43 @@ class App(ctk. CTk):
 
 
     # ======================================
-    # カテゴリ：選んだ内容に応じて、年代・季節の選択肢を段階的に絞り込む(その他は常に選択可)
+    # カテゴリ：選んだ内容に応じて、季節・年代・地域の選択肢を段階的に絞り込む(その他は常に選択可)
     # 「その他」が選ばれている段は絞り込みの条件に使わない(そのカテゴリでは絞らない、という意味なので)
     # ======================================
     def refresh_category_filters(self):
 
-        tone_selected = self. tone_group. selected
+        conditions = {"tone_tags": self. image_group. selected}
 
-        allowed_era = self. get_allowed_tags("era_tags", tone_tag = tone_selected)
-        self. apply_category_gate(self. era_group, allowed_era)
-
-        era_selected = self. era_group. selected
-
-        allowed_season = self. get_allowed_tags("season_tags", tone_tag = tone_selected, era_tag = era_selected)
+        allowed_season = self. get_allowed_tags("season_tags", conditions)
         self. apply_category_gate(self. season_group, allowed_season)
+        conditions["season_tags"] = self. season_group. selected
+
+        allowed_era = self. get_allowed_tags("era_tags", conditions)
+        self. apply_category_gate(self. era_group, allowed_era)
+        conditions["era_tags"] = self. era_group. selected
+
+        allowed_region = self. get_allowed_tags("region_tags", conditions)
+        self. apply_category_gate(self. region_group, allowed_region)
 
 
     # ======================================
     # カテゴリ：colpama.dbに登録された配色から、指定した条件と一緒に登録のあるタグの集合を調べる
     # 条件が無ければNoneを返す(絞り込みなし＝全部有効の意味)
     # ======================================
-    def get_allowed_tags(self, target_column, tone_tag = None, era_tag = None):
+    def get_allowed_tags(self, target_column, conditions):
 
-        conditions = []
+        where_clauses = []
         params = []
 
-        if tone_tag and tone_tag != "その他":
-            conditions. append("(',' || tone_tags || ',') LIKE ?")
-            params. append(f"%,{tone_tag},%")
+        for column, tag in conditions. items():
+            if tag and tag != "その他":
+                where_clauses. append(f"(',' || {column} || ',') LIKE ?")
+                params. append(f"%,{tag},%")
 
-        if era_tag and era_tag != "その他":
-            conditions. append("(',' || era_tags || ',') LIKE ?")
-            params. append(f"%,{era_tag},%")
-
-        if not conditions:
+        if not where_clauses:
             return None
 
-        query = f"SELECT {target_column} FROM presets WHERE " + " AND ". join(conditions)
+        query = f"SELECT {target_column} FROM presets WHERE " + " AND ". join(where_clauses)
         self. cursor. execute(query, params)
 
         allowed = set()
@@ -1812,9 +1832,10 @@ class App(ctk. CTk):
     # ======================================
     def on_category_go(self):
 
-        print("トーン:", self.tone_group.selected)
-        print("年代:", self.era_group.selected)
+        print("イメージ:", self.image_group.selected)
         print("季節:", self.season_group.selected)
+        print("年代:", self.era_group.selected)
+        print("地域:", self.region_group.selected)
 
 
     # ======================================
@@ -2073,9 +2094,10 @@ class App(ctk. CTk):
 
         #ホームボタン押すと全部リセットする
         self. reset_select()
-        self. tone_group. reset()
-        self. era_group. reset()
+        self. image_group. reset()
         self. season_group. reset()
+        self. era_group. reset()
+        self. region_group. reset()
 
 
     # ======================================
