@@ -1,5 +1,6 @@
 import customtkinter as ctk
 import tkinter as tk
+from tkinter import filedialog
 from PIL import ImageGrab
 import sqlite3
 
@@ -468,6 +469,31 @@ class DataEntryApp(ctk. CTk):
         # 3色分の入力欄(ベース/アクセント/サブ)
         self. color_widgets = {}
 
+        # ------------------------------------
+        # 📷 カラーコード(ベース/アクセント/サブ)だけをスクショできるボタン
+        # (この下のcapture_frameの中身だけを撮る。ボタン自体は枠の外に置くので写り込まない)
+        # ------------------------------------
+        capture_btn_row = ctk. CTkFrame(self. scroll, fg_color = "transparent")
+        capture_btn_row. pack(fill = "x", padx = 10)
+
+        self. capture_btn = ctk. CTkButton(
+            capture_btn_row,
+            text = "📷",
+            width = 36,
+            height = 28,
+            corner_radius = 50,
+            fg_color = "#dddddd",
+            hover_color = "#cccccc",
+            text_color = "black",
+            command = self. screenshot_capture_area
+        )
+        self. capture_btn. pack(side = "right", padx = 4, pady = (4, 0))
+
+        ToolTip(self. capture_btn, "カラーコードをスクショ")
+
+        self. capture_frame = ctk. CTkFrame(self. scroll, fg_color = "transparent")
+        self. capture_frame. pack(fill = "x")
+
         self. build_color_row("base", "ベース", 70)
         self. build_color_row("accent", "アクセント", 10)
         self. build_color_row("sub", "サブ", 20)
@@ -612,7 +638,7 @@ class DataEntryApp(ctk. CTk):
     # ======================================
     def build_color_row(self, key, label_text, default_pct):
 
-        row = ctk. CTkFrame(self. scroll, fg_color = "transparent")
+        row = ctk. CTkFrame(self. capture_frame, fg_color = "transparent")
         row. pack(fill = "x", padx = 10, pady = 3)
 
         ctk. CTkLabel(
@@ -745,6 +771,30 @@ class DataEntryApp(ctk. CTk):
                 self. apply_color(key, value)
             except ValueError:
                 print("無効なカラーコードです")
+
+
+    # ======================================
+    # capture_frame(カラーコード)の中身だけをスクリーンショットして保存
+    # ======================================
+    def screenshot_capture_area(self):
+
+        self. update()
+
+        x = self. capture_frame. winfo_rootx()
+        y = self. capture_frame. winfo_rooty()
+        w = self. capture_frame. winfo_width()
+        h = self. capture_frame. winfo_height()
+
+        screenshot = ImageGrab. grab(bbox = (x, y, x + w, y + h), all_screens = True)
+
+        file_path = filedialog. asksaveasfilename(
+            defaultextension = ".png",
+            filetypes = [("PNG画像", "*.png")],
+            initialfile = "color_codes.png"
+        )
+
+        if file_path:
+            screenshot. save(file_path)
 
 
     # ======================================
