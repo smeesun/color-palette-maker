@@ -851,13 +851,10 @@ class App(ctk. CTk):
 
         self. other_base_matches = []
 
+        # GO!結果画面をどのセクションから開いたか(「← 戻る」でその場所に戻すため)
+        self. result_source = "select"
+
         self. space()
-
-
-        # ======================================
-        # 工事中画像（後々削除）🐻
-        # ======================================
-        self. prep_image = self. load_preparation_image()
 
 
         # ======================================
@@ -1067,12 +1064,148 @@ class App(ctk. CTk):
         self. section_line(self. recommend_frame)
 
 
-        # 工事中画像差し込み
-        ctk. CTkLabel(
+        # ------------------------------------
+        # 「ラッキーカラーを見る」文言＋GOボタン(押すたびに完全ランダムで1件選ぶ)
+        # セレクト/カテゴリと違い、別画面には移動せずこのセクション内で完結させる
+        # ------------------------------------
+        self. recommend_go_btn = self. build_go_section(
             self. recommend_frame,
-            text = "",
-            image = self. prep_image
-        ). pack(pady = 10)
+            "ラッキーカラーを見る",
+            self. on_recommend_go
+        )
+
+        # ------------------------------------
+        # 結果表示エリア(最初は非表示。GO!を押すとここに3色が表示される)
+        # ------------------------------------
+        self. recommend_result_area = ctk. CTkFrame(self. recommend_frame, fg_color = "transparent")
+
+        ctk. CTkLabel(
+            self. recommend_result_area,
+            text = "おすすめ3色",
+            font = ("マメロン 5 Hi Regular", 22, "bold")
+        ). pack(pady = (10, 20))
+
+        self. recommend_circle_row = ctk. CTkFrame(self. recommend_result_area, fg_color = "transparent")
+        self. recommend_circle_row. pack(pady = (0, 10))
+
+        self. recommend_circles = {}
+        self. recommend_hex_labels = {}
+
+        for key, label_text in (("base", "メインカラー"), ("accent", "アクセント"), ("sub", "サブ")):
+            col = ctk. CTkFrame(self. recommend_circle_row, fg_color = "transparent")
+            col. pack(side = "left", padx = 8)
+
+            ctk. CTkLabel(
+                col,
+                text = label_text,
+                font = ("ふてほど丸ゴシック", 15),
+                text_color = "#777777"
+            ). pack(pady = (0, 6))
+
+            circle = ctk. CTkLabel(
+                col,
+                text = "",
+                width = 110,
+                height = 110,
+                corner_radius = 55,
+                fg_color = "#FFFFFF"
+            )
+            circle. pack()
+
+            hex_label = ctk. CTkLabel(
+                col,
+                text = "#FFFFFF",
+                font = ("ふてほど丸ゴシック", 15),
+                text_color = "#555555"
+            )
+            hex_label. pack(pady = (8, 0))
+
+            self. recommend_circles[key] = circle
+            self. recommend_hex_labels[key] = hex_label
+
+        ctk. CTkLabel(
+            self. recommend_result_area,
+            text = "-COLOR BALANCE-",
+            font = ("マメロン 5 Hi Regular", 16, "bold"),
+            text_color = "#555555"
+        ). pack(pady = (5, 10))
+
+        self. recommend_bar_frame = ctk. CTkFrame(self. recommend_result_area, fg_color = "transparent", width = 340, height = 40)
+        self. recommend_bar_frame. pack_propagate(False)
+        self. recommend_bar_frame. pack(pady = (0, 10))
+
+        self. recommend_bar_segments = {}
+
+        for key in ("base", "accent", "sub"):
+            seg = ctk. CTkLabel(
+                self. recommend_bar_frame,
+                text = "",
+                text_color = "white",
+                font = ("ふてほど丸ゴシック", 12, "bold"),
+                fg_color = "#FFFFFF"
+            )
+            seg. pack(side = "left", fill = "y")
+
+            self. recommend_bar_segments[key] = seg
+
+        # ------------------------------------
+        # 🔍拡大／📷スクショ／📚プリセット登録(戻るボタンは無し)
+        # ------------------------------------
+        recommend_action_row = ctk. CTkFrame(self. recommend_result_area, fg_color = "transparent")
+        recommend_action_row. pack(pady = (0, 10))
+
+        recommend_detail_btn = ctk. CTkButton(
+            recommend_action_row,
+            text = "🔍",
+            width = 40,
+            height = 30,
+            corner_radius = 50,
+            fg_color = "#e6a5f8",
+            hover_color = "#866091",
+            text_color = "white"
+        )
+        recommend_detail_btn. pack(side = "left", padx = 4)
+
+        ToolTip(recommend_detail_btn, "拡大して詳しく見る")
+
+        recommend_screenshot_btn = ctk. CTkButton(
+            recommend_action_row,
+            text = "📷",
+            width = 40,
+            height = 30,
+            corner_radius = 50,
+            fg_color = "#e6a5f8",
+            hover_color = "#866091",
+            text_color = "white",
+            command = self. screenshot_recommend_result
+        )
+        recommend_screenshot_btn. pack(side = "left", padx = 4)
+
+        ToolTip(recommend_screenshot_btn, "スクショ保存")
+
+        recommend_register_btn = ctk. CTkButton(
+            recommend_action_row,
+            text = "📚",
+            width = 40,
+            height = 30,
+            corner_radius = 50,
+            fg_color = "#e6a5f8",
+            hover_color = "#866091",
+            text_color = "white",
+            command = self. register_recommend_result_to_preset
+        )
+        recommend_register_btn. pack(side = "left", padx = 4)
+
+        ToolTip(recommend_register_btn, "プリセットに登録")
+
+        # ------------------------------------
+        # 「違うカラーも見てみる」文言＋GOボタン(再度押すとまたランダムに選び直す)
+        # ------------------------------------
+        self. recommend_again_btn = self. build_go_section(
+            self. recommend_result_area,
+            "違うカラーも見てみる",
+            self. on_recommend_go
+        )
 
 
         self. space()
@@ -1485,6 +1618,7 @@ class App(ctk. CTk):
             print("まだ配色データが登録されていません")
             return
 
+        self. result_source = "select"
         self. show_select_result(row)
 
 
@@ -1546,28 +1680,13 @@ class App(ctk. CTk):
 
 
     # ======================================
-    # セレクトのGO!結果画面の中身を、検索結果の配色で埋める
+    # GO!結果画面の中身を、検索結果の配色で埋める(セレクト・カテゴリ共通)
     # ======================================
     def render_select_result(self, row):
 
-        current_id, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct = row
+        current_id, base_hex = row[0], row[1]
 
-        hexes = {"base": base_hex, "accent": accent_hex, "sub": sub_hex}
-        pcts = {"base": base_pct, "accent": accent_pct, "sub": sub_pct}
-
-        for key in ("base", "accent", "sub"):
-            self. result_circles[key]. configure(fg_color = hexes[key])
-            self. result_hex_labels[key]. configure(text = hexes[key]. upper())
-
-        total_bar_width = 340
-
-        for key in ("base", "accent", "sub"):
-            seg_width = max(1, round(total_bar_width * pcts[key] / 100))
-
-            self. result_bar_segments[key]. configure(
-                width = seg_width,
-                fg_color = hexes[key]
-            )
+        self. apply_result_colors(row, self. result_circles, self. result_hex_labels, self. result_bar_segments)
 
         # 同じベース色を持つ他の配色があるかを調べて、あるボタンだけ表示する
         self. other_base_matches = self. get_other_base_matches(base_hex, current_id)
@@ -1576,6 +1695,27 @@ class App(ctk. CTk):
             self. other_base_section. pack(pady = (10, 10))
         else:
             self. other_base_section. pack_forget()
+
+
+    # ======================================
+    # 検索結果(row)の3色を、指定した円・コード表示・比率バーに反映する
+    # (セレクト/カテゴリの結果画面、ラッキーカラーの結果表示で共通して使う)
+    # ======================================
+    def apply_result_colors(self, row, circles, hex_labels, bar_segments, bar_width = 340):
+
+        _id, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct = row
+
+        hexes = {"base": base_hex, "accent": accent_hex, "sub": sub_hex}
+        pcts = {"base": base_pct, "accent": accent_pct, "sub": sub_pct}
+
+        for key in ("base", "accent", "sub"):
+            circles[key]. configure(fg_color = hexes[key])
+            hex_labels[key]. configure(text = hexes[key]. upper())
+
+            seg_width = max(1, round(bar_width * pcts[key] / 100))
+            bar_segments[key]. configure(width = seg_width, fg_color = hexes[key])
+
+        return hexes
 
 
     # ======================================
@@ -1605,7 +1745,7 @@ class App(ctk. CTk):
 
 
     # ======================================
-    # セレクトのGO!結果画面を表示する(普段見えているスクロール部分を隠す)
+    # GO!結果画面を表示する(セレクト・カテゴリ共通。普段見えているスクロール部分を隠す)
     # ======================================
     def show_select_result(self, row):
 
@@ -1616,47 +1756,58 @@ class App(ctk. CTk):
 
 
     # ======================================
-    # セレクトのGO!結果画面：戻るボタンの処理(セレクトしていた画面に戻す)
+    # GO!結果画面：戻るボタンの処理(result_sourceに応じて元のセクションに戻す)
     # ======================================
     def close_select_result(self):
 
         self. select_result_frame. pack_forget()
         self. scroll. pack(fill = "both", expand = True)
-        self. scroll_select()
+
+        if self. result_source == "category":
+            self. scroll_category()
+        else:
+            self. scroll_select()
 
 
     # ======================================
-    # セレクトのGO!結果画面：3色プレビュー＋比率バーをスクショ保存する
+    # GO!結果表示：3色プレビュー＋比率バーをスクショ保存する
+    # (セレクト/カテゴリの結果画面、ラッキーカラーの結果表示で共通して使う)
     # ======================================
-    def screenshot_select_result(self):
+    def screenshot_result_area(self, circle_row, bar_frame, default_filename):
 
         self. update()
 
-        x = min(self. circle_row. winfo_rootx(), self. result_bar_frame. winfo_rootx())
-        y = self. circle_row. winfo_rooty()
+        x = min(circle_row. winfo_rootx(), bar_frame. winfo_rootx())
+        y = circle_row. winfo_rooty()
 
         right = max(
-            self. circle_row. winfo_rootx() + self. circle_row. winfo_width(),
-            self. result_bar_frame. winfo_rootx() + self. result_bar_frame. winfo_width()
+            circle_row. winfo_rootx() + circle_row. winfo_width(),
+            bar_frame. winfo_rootx() + bar_frame. winfo_width()
         )
-        bottom = self. result_bar_frame. winfo_rooty() + self. result_bar_frame. winfo_height()
+        bottom = bar_frame. winfo_rooty() + bar_frame. winfo_height()
 
         screenshot = ImageGrab. grab(bbox = (x, y, right, bottom), all_screens = True)
 
         file_path = filedialog. asksaveasfilename(
             defaultextension = ".png",
             filetypes = [("PNG画像", "*.png")],
-            initialfile = "recommend.png"
+            initialfile = default_filename
         )
 
         if file_path:
             screenshot. save(file_path)
 
 
+    def screenshot_select_result(self):
+
+        self. screenshot_result_area(self. circle_row, self. result_bar_frame, "recommend.png")
+
+
     # ======================================
-    # セレクトのGO!結果画面：今表示している3色を、選択中のプリセット枠に登録する
+    # GO!結果表示：今表示している3色を、選択中のプリセット枠に登録する
+    # (セレクト/カテゴリの結果画面、ラッキーカラーの結果表示で共通して使う)
     # ======================================
-    def register_result_to_preset(self):
+    def register_colors_to_preset(self, circles):
 
         # 開いているタブではなく、空いている一番若い番号のスロットに登録する
         target_index = None
@@ -1671,9 +1822,9 @@ class App(ctk. CTk):
             return
 
         colors = [
-            self. result_circles["base"]. cget("fg_color"),
-            self. result_circles["accent"]. cget("fg_color"),
-            self. result_circles["sub"]. cget("fg_color"),
+            circles["base"]. cget("fg_color"),
+            circles["accent"]. cget("fg_color"),
+            circles["sub"]. cget("fg_color"),
         ]
 
         self. preset_data[target_index]["colors"] = colors
@@ -1682,6 +1833,11 @@ class App(ctk. CTk):
         self. render_preset_page()
 
         self. show_toast(f"プリセット {target_index + 1} に登録しました")
+
+
+    def register_result_to_preset(self):
+
+        self. register_colors_to_preset(self. result_circles)
 
 
     # ======================================
@@ -1861,14 +2017,132 @@ class App(ctk. CTk):
 
 
     # ======================================
-    # 「このチョイスで調べる」ボタンの処理（仮）
+    # 「このチョイスで調べる」ボタンの処理
     # ======================================
     def on_category_go(self):
 
-        print("イメージ:", self.image_group.selected)
-        print("季節:", self.season_group.selected)
-        print("年代:", self.era_group.selected)
-        print("地域:", self.region_group.selected)
+        if not self. has_any_category_selected():
+            self. show_toast("条件を1つ以上選んでください")
+            return
+
+        row = self. find_preset_by_category()
+
+        if row is None:
+            self. show_toast("条件に合う配色が見つかりませんでした")
+            return
+
+        self. result_source = "category"
+        self. show_select_result(row)
+
+
+    # ======================================
+    # カテゴリ：4カテゴリのうち何か1つでも選ばれているか(「その他」は条件扱いしない)
+    # ======================================
+    def has_any_category_selected(self):
+
+        return any(
+            group. selected is not None and group. selected != "その他"
+            for group in (self. image_group, self. season_group, self. era_group, self. region_group)
+        )
+
+
+    # ======================================
+    # カテゴリ：選ばれている条件(未選択・「その他」は絞り込みに使わない)を
+    # すべて満たす配色をcolpama.dbから探す。複数あればランダムに1件返す
+    # ======================================
+    def find_preset_by_category(self):
+
+        conditions = []
+        params = []
+
+        for group, column in (
+            (self. image_group, "tone_tags"),
+            (self. season_group, "season_tags"),
+            (self. era_group, "era_tags"),
+            (self. region_group, "region_tags"),
+        ):
+            tag = group. selected
+
+            if tag and tag != "その他":
+                conditions. append(f"(',' || {column} || ',') LIKE ?")
+                params. append(f"%,{tag},%")
+
+        if not conditions:
+            return None
+
+        query = """
+            SELECT id, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct
+            FROM presets
+            WHERE """ + " AND ". join(conditions)
+
+        self. cursor. execute(query, params)
+        rows = self. cursor. fetchall()
+
+        if not rows:
+            return None
+
+        return random. choice(rows)
+
+
+    # ======================================
+    # 「ラッキーカラーを見る」「違うカラーも見てみる」ボタンの処理
+    # (条件なし、押すたびに完全ランダムで1件選ぶ。別画面には移らずこのセクション内で完結)
+    # ======================================
+    def on_recommend_go(self):
+
+        row = self. find_random_preset()
+
+        if row is None:
+            self. show_toast("まだ配色データが登録されていません")
+            return
+
+        self. render_recommend_result(row)
+
+        # GO!ボタンは常に1つだけにする(1回目のボタンは結果が出たら隠し、
+        # 以降は結果の下の「違うカラーも見てみる」のGO!だけを使う)
+        self. recommend_go_btn. pack_forget()
+        self. recommend_result_area. pack(fill = "x")
+
+
+    # ======================================
+    # ラッキーカラーの結果表示エリアを、検索結果の配色で埋める
+    # ======================================
+    def render_recommend_result(self, row):
+
+        self. apply_result_colors(row, self. recommend_circles, self. recommend_hex_labels, self. recommend_bar_segments)
+
+
+    # ======================================
+    # colpama.dbからランダムに1件選ぶ(ラッキーカラー用、絞り込み条件なし)
+    # ======================================
+    def find_random_preset(self):
+
+        self. cursor. execute("""
+            SELECT id, base_hex, base_pct, accent_hex, accent_pct, sub_hex, sub_pct
+            FROM presets
+        """)
+        rows = self. cursor. fetchall()
+
+        if not rows:
+            return None
+
+        return random. choice(rows)
+
+
+    # ======================================
+    # ラッキーカラーの結果表示：3色プレビュー＋比率バーをスクショ保存する
+    # ======================================
+    def screenshot_recommend_result(self):
+
+        self. screenshot_result_area(self. recommend_circle_row, self. recommend_bar_frame, "lucky_color.png")
+
+
+    # ======================================
+    # ラッキーカラーの結果表示：今表示している3色を、選択中のプリセット枠に登録する
+    # ======================================
+    def register_recommend_result_to_preset(self):
+
+        self. register_colors_to_preset(self. recommend_circles)
 
 
     # ======================================
@@ -2096,21 +2370,6 @@ class App(ctk. CTk):
         spacer. pack()
 
 
-    # ======================================
-    # 工事中画像の読み込み
-    # ======================================
-    def load_preparation_image(self):
-
-        image = Image. open("images/preparation.png")
-        image = image. resize((380, 600))
-
-        return ctk. CTkImage(
-            light_image = image,
-            dark_image = image,
-            size = (380, 600)
-        )
-
-
 #=============クラス直下（__init__の外）のものはここまで
 
 
@@ -2131,6 +2390,8 @@ class App(ctk. CTk):
         self. season_group. reset()
         self. era_group. reset()
         self. region_group. reset()
+        self. recommend_result_area. pack_forget()
+        self. recommend_go_btn. pack(pady = (0, 15))
 
 
     # ======================================
