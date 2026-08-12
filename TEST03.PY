@@ -1318,6 +1318,8 @@ class App(ctk. CTk):
         self. clipboard_append(color)
         self. update()
 
+        self. show_toast("コピーしました")
+
     # ======================================
     # カラーコード反映
     # ======================================
@@ -2271,40 +2273,29 @@ class App(ctk. CTk):
             ). pack(side = "left", padx = 5)
 
         # ------------------------------------
-        # カラーコード表示 ＋ コピーボタン(色ごとに1組)
+        # カラーコード表示(クリックでコピーできるコード欄、色ごとに1個)
         # ------------------------------------
         code_row = ctk. CTkFrame(self. preset_content_frame, fg_color = "transparent")
         code_row. pack(pady = (0, 10))
 
         for color in colors:
-            code_col = ctk. CTkFrame(code_row, width = 80, height = 30, fg_color = "transparent")
-            code_col. pack_propagate(False)
-            code_col. pack(side = "left", padx = 5)
-
-            inner = ctk. CTkFrame(code_col, fg_color = "transparent")
-            inner. pack(expand = True)
-
-            ctk. CTkLabel(
-                inner,
+            code_btn = ctk. CTkButton(
+                code_row,
                 text = color. upper(),
-                font = ("ふてほど丸ゴシック", 11),
-                text_color = "#555555"
-            ). pack(side = "left")
-
-            copy_btn = ctk. CTkButton(
-                inner,
-                text = "📝",
-                width = 24,
-                height = 24,
-                corner_radius = 50,
-                fg_color = "#e6a5f8",
-                hover_color = "#866091",
-                text_color = "white",
+                width = 90,
+                height = 28,
+                corner_radius = 6,
+                fg_color = "white",
+                hover_color = "#f0f0f0",
+                text_color = "black",
+                border_width = 1,
+                border_color = "black",
+                font = ("ふてほど丸ゴシック", 12),
                 command = lambda c = color. upper(): self. copy_preset_color(c)
             )
-            copy_btn. pack(side = "left", padx = (3, 0))
+            code_btn. pack(side = "left", padx = 5)
 
-            ToolTip(copy_btn, "コピーする")
+            ToolTip(code_btn, "コピーする")
 
 
     # ======================================
@@ -2320,6 +2311,8 @@ class App(ctk. CTk):
             self. save_preset_slot(self. current_preset_page)
 
         self. render_preset_page()
+
+        self. show_toast("名前を変更しました")
 
 
     # ======================================
