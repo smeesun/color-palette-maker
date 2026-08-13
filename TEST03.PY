@@ -1,7 +1,7 @@
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import filedialog
-from PIL import Image, ImageGrab, ImageTk
+from PIL import Image, ImageGrab, ImageTk, ImageDraw
 import colorsys
 import math
 import sqlite3
@@ -727,7 +727,8 @@ class App(ctk. CTk):
             corner_radius = 50,
             fg_color = "#e6a5f8",
             hover_color = "#866091",
-            text_color = "white"
+            text_color = "white",
+            command = lambda: self. open_detail_view(self. current_result_row, "select_result")
         )
         detail_btn. pack(side = "right")
 
@@ -772,7 +773,7 @@ class App(ctk. CTk):
         ctk. CTkLabel(
             self. select_result_frame,
             text = "おすすめ3色",
-            font = ("マメロン 5 Hi Regular", 22, "bold")
+            font = ("ふてほど丸ゴシック", 22, "bold")
         ). pack(pady = (20, 20))
 
         self. circle_row = ctk. CTkFrame(self. select_result_frame, fg_color = "transparent")
@@ -855,6 +856,160 @@ class App(ctk. CTk):
         self. result_source = "select"
 
         self. space()
+
+
+        # ------------------------------------
+        # 🔍「拡大して詳しく見る」の詳細ページ
+        # (セレクト/カテゴリ/ラッキーカラーどの結果画面からも共通で開く。開いている間だけウィンドウを横広・縦やや短めにする)
+        # ------------------------------------
+        self. detail_frame = ctk. CTkFrame(self, fg_color = "white")
+
+        detail_top_row = ctk. CTkFrame(self. detail_frame, fg_color = "transparent")
+        detail_top_row. pack(fill = "x", padx = 20, pady = (15, 0))
+
+        detail_back_btn = ctk. CTkButton(
+            detail_top_row,
+            text = "← 戻る",
+            width = 80,
+            height = 30,
+            corner_radius = 50,
+            fg_color = "#e6a5f8",
+            hover_color = "#866091",
+            text_color = "white",
+            font = ("マメロン 5 Hi Regular", 13),
+            command = self. close_detail_view
+        )
+        detail_back_btn. pack(side = "left")
+
+        detail_register_btn = ctk. CTkButton(
+            detail_top_row,
+            text = "📚",
+            width = 40,
+            height = 30,
+            corner_radius = 50,
+            fg_color = "#e6a5f8",
+            hover_color = "#866091",
+            text_color = "white",
+            command = self. register_detail_result_to_preset
+        )
+        detail_register_btn. pack(side = "right")
+
+        ToolTip(detail_register_btn, "プリセットに登録")
+
+        detail_screenshot_btn = ctk. CTkButton(
+            detail_top_row,
+            text = "📷",
+            width = 40,
+            height = 30,
+            corner_radius = 50,
+            fg_color = "#e6a5f8",
+            hover_color = "#866091",
+            text_color = "white",
+            command = self. screenshot_detail_result
+        )
+        detail_screenshot_btn. pack(side = "right", padx = (0, 6))
+
+        ToolTip(detail_screenshot_btn, "スクショ保存")
+
+        ctk. CTkLabel(
+            self. detail_frame,
+            text = "おすすめ3色",
+            font = ("ふてほど丸ゴシック", 20, "bold")
+        ). pack(pady = (15, 20))
+
+        self. detail_circle_row = ctk. CTkFrame(self. detail_frame, fg_color = "transparent")
+        self. detail_circle_row. pack(pady = (0, 10))
+
+        self. detail_circles = {}
+        self. detail_code_buttons = {}
+
+        for key, label_text in (("base", "メインカラー"), ("accent", "アクセント"), ("sub", "サブ")):
+            col = ctk. CTkFrame(self. detail_circle_row, fg_color = "transparent")
+            col. pack(side = "left", padx = 4)
+
+            ctk. CTkLabel(
+                col,
+                text = label_text,
+                font = ("ふてほど丸ゴシック", 13),
+                text_color = "#777777"
+            ). pack(pady = (0, 8))
+
+            circle = ctk. CTkLabel(
+                col,
+                text = "",
+                width = 150,
+                height = 150,
+                corner_radius = 75,
+                fg_color = "#FFFFFF"
+            )
+            circle. pack()
+
+            code_btn = ctk. CTkButton(
+                col,
+                text = "#FFFFFF",
+                width = 90,
+                height = 26,
+                corner_radius = 6,
+                fg_color = "white",
+                hover_color = "#f0f0f0",
+                text_color = "black",
+                border_width = 1,
+                border_color = "black",
+                font = ("ふてほど丸ゴシック", 11)
+            )
+            code_btn. pack(pady = (10, 0))
+
+            # 押した時に表示されている文字をそのままコピーする(常に今表示中の色になる)
+            code_btn. configure(command = lambda b = code_btn: self. copy_preset_color(b. cget("text")))
+
+            ToolTip(code_btn, "コピーする")
+
+            self. detail_circles[key] = circle
+            self. detail_code_buttons[key] = code_btn
+
+        ctk. CTkLabel(
+            self. detail_frame,
+            text = "-COLOR BALANCE-",
+            font = ("マメロン 5 Hi Regular", 15, "bold"),
+            text_color = "#555555"
+        ). pack(pady = (20, 10))
+
+        self. detail_bar_frame = ctk. CTkFrame(self. detail_frame, fg_color = "transparent", width = 480, height = 46)
+        self. detail_bar_frame. pack_propagate(False)
+        self. detail_bar_frame. pack(pady = (0, 20))
+
+        self. detail_bar_segments = {}
+
+        for key in ("base", "accent", "sub"):
+            seg = ctk. CTkLabel(
+                self. detail_bar_frame,
+                text = "",
+                text_color = "white",
+                font = ("ふてほど丸ゴシック", 13, "bold"),
+                fg_color = "#FFFFFF"
+            )
+            seg. pack(side = "left", fill = "y")
+
+            self. detail_bar_segments[key] = seg
+
+        # ------------------------------------
+        # 広告POP風のサンプルイメージ(この3色をCOLOR BALANCEの比率で使うとこんな感じ、という見本)
+        # ------------------------------------
+        mockup_border = ctk. CTkFrame(
+            self. detail_frame,
+            fg_color = "white",
+            border_width = 2,
+            border_color = "#d0d0d0",
+            corner_radius = 12
+        )
+        mockup_border. pack(pady = (0, 15))
+
+        self. detail_mockup_label = ctk. CTkLabel(mockup_border, text = "", width = 480, height = 200)
+        self. detail_mockup_label. pack(padx = 8, pady = 8)
+
+        self. current_result_row = None
+        self. current_recommend_row = None
+        self. detail_return_to = "scroll"
 
 
         # ======================================
@@ -1082,7 +1237,7 @@ class App(ctk. CTk):
         ctk. CTkLabel(
             self. recommend_result_area,
             text = "おすすめ3色",
-            font = ("マメロン 5 Hi Regular", 22, "bold")
+            font = ("ふてほど丸ゴシック", 22, "bold")
         ). pack(pady = (10, 20))
 
         self. recommend_circle_row = ctk. CTkFrame(self. recommend_result_area, fg_color = "transparent")
@@ -1162,7 +1317,8 @@ class App(ctk. CTk):
             corner_radius = 50,
             fg_color = "#e6a5f8",
             hover_color = "#866091",
-            text_color = "white"
+            text_color = "white",
+            command = lambda: self. open_detail_view(self. current_recommend_row, "scroll")
         )
         recommend_detail_btn. pack(side = "left", padx = 4)
 
@@ -1688,6 +1844,8 @@ class App(ctk. CTk):
 
         current_id, base_hex = row[0], row[1]
 
+        self. current_result_row = row
+
         self. apply_result_colors(row, self. result_circles, self. result_hex_labels, self. result_bar_segments)
 
         # 同じベース色を持つ他の配色があるかを調べて、あるボタンだけ表示する
@@ -1803,6 +1961,94 @@ class App(ctk. CTk):
     def screenshot_select_result(self):
 
         self. screenshot_result_area(self. circle_row, self. result_bar_frame, "recommend.png")
+
+
+    # ======================================
+    # 🔍「拡大して詳しく見る」：詳細ページを開く(row=表示する検索結果、return_to=戻り先)
+    # ======================================
+    def open_detail_view(self, row, return_to):
+
+        if row is None:
+            return
+
+        self. detail_return_to = return_to
+
+        hexes = self. apply_result_colors(row, self. detail_circles, self. detail_code_buttons, self. detail_bar_segments, bar_width = 480)
+
+        mockup_image = self. generate_mockup_image(hexes["base"], hexes["accent"], hexes["sub"])
+        self. detail_mockup_photo = ctk. CTkImage(
+            light_image = mockup_image,
+            dark_image = mockup_image,
+            size = (480, 200)
+        )
+        self. detail_mockup_label. configure(image = self. detail_mockup_photo, text = "")
+
+        if return_to == "select_result":
+            self. select_result_frame. pack_forget()
+        else:
+            self. scroll. pack_forget()
+
+        self. geometry("700x740")
+        self. detail_frame. pack(fill = "both", expand = True)
+
+
+    # ======================================
+    # 🔍詳細ページ：戻るボタンの処理(開いた時の元の場所に戻し、ウィンドウサイズも戻す)
+    # ======================================
+    def close_detail_view(self):
+
+        self. detail_frame. pack_forget()
+        self. geometry("400x690")
+
+        if self. detail_return_to == "select_result":
+            self. select_result_frame. pack(fill = "both", expand = True)
+        else:
+            self. scroll. pack(fill = "both", expand = True)
+
+
+    # ======================================
+    # 🔍詳細ページ：色見本のイメージ画像を作る
+    # (3色をCOLOR BALANCEの比率で使うとどんな雰囲気になるかの、広告POP風のサンプル)
+    # ======================================
+    def generate_mockup_image(self, base_hex, accent_hex, sub_hex, width = 480, height = 200):
+
+        image = Image. new("RGB", (width, height), base_hex)
+        draw = ImageDraw. Draw(image)
+
+        # アクセント色の絵の具ストロークを2〜3個、ランダムな位置・大きさで
+        for _ in range(3):
+            w = random. randint(int(width * 0.35), int(width * 0.55))
+            h = random. randint(int(height * 0.45), int(height * 0.75))
+            x = random. randint(-w // 3, width - w * 2 // 3)
+            y = random. randint(-h // 3, height - h * 2 // 3)
+
+            draw. ellipse([x, y, x + w, y + h], fill = accent_hex)
+
+        # サブ色の小さい丸を散らす
+        for _ in range(7):
+            r = random. randint(8, 18)
+            x = random. randint(0, width)
+            y = random. randint(0, height)
+
+            draw. ellipse([x - r, y - r, x + r, y + r], fill = sub_hex)
+
+        return image
+
+
+    # ======================================
+    # 🔍詳細ページ：今表示している3色をスクショ保存する
+    # ======================================
+    def screenshot_detail_result(self):
+
+        self. screenshot_result_area(self. detail_circle_row, self. detail_bar_frame, "recommend.png")
+
+
+    # ======================================
+    # 🔍詳細ページ：今表示している3色を、選択中のプリセット枠に登録する
+    # ======================================
+    def register_detail_result_to_preset(self):
+
+        self. register_colors_to_preset(self. detail_circles)
 
 
     # ======================================
@@ -2111,6 +2357,8 @@ class App(ctk. CTk):
     # ======================================
     def render_recommend_result(self, row):
 
+        self. current_recommend_row = row
+
         self. apply_result_colors(row, self. recommend_circles, self. recommend_hex_labels, self. recommend_bar_segments)
 
 
@@ -2371,7 +2619,10 @@ class App(ctk. CTk):
     # ======================================
     def go_home(self):
 
-        # GO!の結果画面が開いていたら閉じて、普段のスクロール画面に戻す
+        # 🔍詳細ページ・GO!の結果画面が開いていたら閉じて、普段のスクロール画面に戻す
+        self. detail_frame. pack_forget()
+        self. geometry("400x690")
+
         self. select_result_frame. pack_forget()
         self. scroll. pack(fill = "both", expand = True)
 
