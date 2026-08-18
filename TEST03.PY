@@ -1,7 +1,7 @@
 import customtkinter as ctk
 import tkinter as tk
 from tkinter import filedialog
-from PIL import Image, ImageGrab, ImageTk, ImageDraw
+from PIL import Image, ImageGrab, ImageTk, ImageDraw, ImageFont
 import colorsys
 import math
 import sqlite3
@@ -2070,30 +2070,218 @@ class App(ctk. CTk):
     # ======================================
     # 🔍詳細ページ：色見本のイメージ画像を作る
     # (3色をCOLOR BALANCEの比率で使うとどんな雰囲気になるかの、広告POP風のサンプル)
+    # 見た目のパターンを何種類か用意しておき、毎回ランダムに1つ選ぶ
     # ======================================
     def generate_mockup_image(self, base_hex, accent_hex, sub_hex, width = 480, height = 200):
 
-        image = Image. new("RGB", (width, height), base_hex)
+        templates = [
+            self. generate_mockup_poster,
+            self. generate_mockup_badge,
+            self. generate_mockup_badge_swap,
+            self. generate_mockup_stripes,
+        ]
+
+        template = random. choice(templates)
+
+        return template(base_hex, accent_hex, sub_hex, width, height)
+
+
+    # ======================================
+    # サンプル画像パターン①：絵の具ストローク＋ドット柄＋キャッチコピー(広告ポスター風)
+    # ======================================
+    def generate_mockup_poster(self, base_hex, accent_hex, sub_hex, width, height):
+
+        # 縁をなめらかにするため、3倍の解像度で描いてから最後に縮小する
+        scale = 3
+        big_w, big_h = width * scale, height * scale
+
+        image = Image. new("RGB", (big_w, big_h), base_hex)
         draw = ImageDraw. Draw(image)
 
-        # アクセント色の絵の具ストロークを2〜3個、ランダムな位置・大きさで
+        # ------------------------------------
+        # アクセント色のドット柄(右下エリアに規則的なグリッドで敷く、参考にしたステッカーの模様風)
+        # ------------------------------------
+        dot_zone_x = int(big_w * 0.55)
+        dot_zone_y = int(big_h * 0.35)
+        dot_spacing = int(big_w * 0.055)
+        dot_r = int(dot_spacing * 0.16)
+
+        for gx in range(dot_zone_x, big_w + dot_spacing, dot_spacing):
+            for gy in range(dot_zone_y, big_h + dot_spacing, dot_spacing):
+                draw. ellipse([gx - dot_r, gy - dot_r, gx + dot_r, gy + dot_r], fill = accent_hex)
+
+        # ------------------------------------
+        # サブ色の絵の具ストロークを2〜3個(上部は文字スペースとして避ける)
+        # ------------------------------------
         for _ in range(3):
-            w = random. randint(int(width * 0.35), int(width * 0.55))
-            h = random. randint(int(height * 0.45), int(height * 0.75))
-            x = random. randint(-w // 3, width - w * 2 // 3)
-            y = random. randint(-h // 3, height - h * 2 // 3)
+            w = random. randint(int(big_w * 0.35), int(big_w * 0.55))
+            h = random. randint(int(big_h * 0.40), int(big_h * 0.60))
+            x = random. randint(-w // 3, big_w - w * 2 // 3)
+            y = random. randint(int(big_h * 0.35), big_h - h // 2)
 
-            draw. ellipse([x, y, x + w, y + h], fill = accent_hex)
+            draw. ellipse([x, y, x + w, y + h], fill = sub_hex)
 
-        # サブ色の小さい丸を散らす
-        for _ in range(7):
-            r = random. randint(8, 18)
-            x = random. randint(0, width)
-            y = random. randint(0, height)
+        # ------------------------------------
+        # 広告っぽい短い文字を左上に(背景の明るさに応じて文字色を白/黒に切り替える)
+        # ------------------------------------
+        catch_copy = random. choice(["COLOR PALETTE", "NEW COLOR", "SPECIAL EDITION", "COLOR STYLE"])
 
-            draw. ellipse([x - r, y - r, x + r, y + r], fill = sub_hex)
+        text_color = self. get_contrast_text_color(base_hex)
 
-        return image
+        try:
+            font = ImageFont. truetype("fonts/Futehodo-MaruGothic.ttf", int(big_h * 0.14))
+        except OSError:
+            font = ImageFont. load_default()
+
+        draw. text((int(big_w * 0.06), int(big_h * 0.10)), catch_copy, font = font, fill = text_color)
+
+        # 3倍で描いた画像を本来のサイズへなめらかに縮小する
+        return image. resize((width, height), Image. LANCZOS)
+
+
+    # ======================================
+    # サンプル画像パターン②：中央に文字＋外枠のライン(バッジ・ロゴ風)
+    # 背景=ベース色、外枠のライン=アクセント色、中央の文字=サブ色(アクセント色の細い縁取り付き)
+    # ======================================
+    def generate_mockup_badge(self, base_hex, accent_hex, sub_hex, width, height):
+
+        scale = 3
+        big_w, big_h = width * scale, height * scale
+
+        image = Image. new("RGB", (big_w, big_h), base_hex)
+        draw = ImageDraw. Draw(image)
+
+        margin = int(min(big_w, big_h) * 0.1)
+        # 文字側にもアクセント色の縁取りを足すぶん、枠線はほんの少し細くしてバランスを取る
+        line_width = max(2, int(min(big_w, big_h) * 0.016))
+
+        draw. rectangle(
+            [margin, margin, big_w - margin, big_h - margin],
+            outline = accent_hex,
+            width = line_width
+        )
+
+        text = "FRONTIER"
+
+        # POPな丸ゴシックだと可愛すぎるので、太めの明朝体(游明朝 Demibold)でクールな見た目にする
+        # Windows10/11に標準で入っているフォントなのでファイル同梱はせず、システムのフォントフォルダから直接読み込む
+        windows_font_path = os. path. join(os. environ. get("WINDIR", "C:\\Windows"), "Fonts", "yumindb.ttf")
+
+        try:
+            font = ImageFont. truetype(windows_font_path, int(big_h * 0.22))
+        except OSError:
+            try:
+                font = ImageFont. truetype("fonts/Futehodo-MaruGothic.ttf", int(big_h * 0.22))
+            except OSError:
+                font = ImageFont. load_default()
+
+        # サブ色の文字がベース色と近い色になり読みにくくなるケースがあるため、アクセント色の細い縁取りで文字を強調する
+        stroke_width = max(1, int(big_h * 0.012))
+
+        bbox = draw. textbbox((0, 0), text, font = font, stroke_width = stroke_width)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+
+        draw. text(
+            ((big_w - text_w) / 2 - bbox[0], (big_h - text_h) / 2 - bbox[1]),
+            text,
+            font = font,
+            fill = sub_hex,
+            stroke_width = stroke_width,
+            stroke_fill = accent_hex
+        )
+
+        return image. resize((width, height), Image. LANCZOS)
+
+
+    # ======================================
+    # サンプル画像パターン②-b：中央に文字＋外枠のライン(バッジ・ロゴ風の色違いバージョン)
+    # 背景=ベース色、外枠のライン=サブ色(太め)、中央の文字=アクセント色
+    # ======================================
+    def generate_mockup_badge_swap(self, base_hex, accent_hex, sub_hex, width, height):
+
+        scale = 3
+        big_w, big_h = width * scale, height * scale
+
+        image = Image. new("RGB", (big_w, big_h), base_hex)
+        draw = ImageDraw. Draw(image)
+
+        margin = int(min(big_w, big_h) * 0.1)
+        # ①のアクセント枠より太めのラインにする
+        line_width = max(2, int(min(big_w, big_h) * 0.035))
+
+        draw. rectangle(
+            [margin, margin, big_w - margin, big_h - margin],
+            outline = sub_hex,
+            width = line_width
+        )
+
+        text = "FRONTIER"
+
+        windows_font_path = os. path. join(os. environ. get("WINDIR", "C:\\Windows"), "Fonts", "yumindb.ttf")
+
+        try:
+            font = ImageFont. truetype(windows_font_path, int(big_h * 0.22))
+        except OSError:
+            try:
+                font = ImageFont. truetype("fonts/Futehodo-MaruGothic.ttf", int(big_h * 0.22))
+            except OSError:
+                font = ImageFont. load_default()
+
+        bbox = draw. textbbox((0, 0), text, font = font)
+        text_w = bbox[2] - bbox[0]
+        text_h = bbox[3] - bbox[1]
+
+        draw. text(
+            ((big_w - text_w) / 2 - bbox[0], (big_h - text_h) / 2 - bbox[1]),
+            text,
+            font = font,
+            fill = accent_hex
+        )
+
+        return image. resize((width, height), Image. LANCZOS)
+
+
+    # ======================================
+    # サンプル画像パターン③：斜めのボーダー(ベース:アクセント:サブ ≒ 122:15:37の太さで縞にする、アクセントは細めのライン)
+    # ======================================
+    def generate_mockup_stripes(self, base_hex, accent_hex, sub_hex, width, height):
+
+        scale = 3
+        w, h = width * scale, height * scale
+
+        # 回転させても四隅まで埋まるよう、対角線の長さぶんの正方形に横縞を描く
+        diag = int((w ** 2 + h ** 2) ** 0.5) + 40
+
+        stripe_image = Image. new("RGB", (diag, diag), base_hex)
+        draw = ImageDraw. Draw(stripe_image)
+
+        stripe_pattern = [(base_hex, 122), (accent_hex, 15), (sub_hex, 37)]
+
+        y = 0
+        while y < diag:
+            for color, band_height in stripe_pattern:
+                draw. rectangle([0, y, diag, y + band_height], fill = color)
+                y += band_height
+
+        rotated = stripe_image. rotate(35, resample = Image. BICUBIC)
+
+        left = (diag - w) // 2
+        top = (diag - h) // 2
+        cropped = rotated. crop((left, top, left + w, top + h))
+
+        return cropped. resize((width, height), Image. LANCZOS)
+
+
+    # ======================================
+    # サンプル画像：背景色の明るさに応じて、読みやすい文字色(白 or 濃いグレー)を選ぶ
+    # ======================================
+    def get_contrast_text_color(self, base_hex):
+
+        r, g, b = self. hex_to_rgb(base_hex)
+        brightness = (r * 299 + g * 587 + b * 114) / 1000
+
+        return "#333333" if brightness > 150 else "#FFFFFF"
 
 
     # ======================================
