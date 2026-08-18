@@ -3,6 +3,41 @@ import tkinter as tk
 from tkinter import filedialog
 from PIL import ImageGrab
 import sqlite3
+import ctypes
+import os
+import sys
+
+
+# ======================================
+# どこから実行しても colpama.db や fonts/ を正しく見つけられるように、
+# カレントディレクトリをこのファイル自身がある場所に固定する
+# ======================================
+os. chdir(os. path. dirname(os. path. abspath(__file__)))
+
+
+# ======================================
+# フォント読み込み(fontsフォルダを、インストールせずこのアプリの実行中だけ使えるようにする)
+# 提出先のパソコンにフォントが入っていなくても、同じ見た目で動くようにするための処理
+# ======================================
+def load_private_fonts():
+
+    if sys. platform != "win32":
+        return
+
+    fonts_dir = os. path. join(os. path. dirname(os. path. abspath(__file__)), "fonts")
+
+    if not os. path. isdir(fonts_dir):
+        return
+
+    FR_PRIVATE = 0x10
+
+    for filename in os. listdir(fonts_dir):
+        if filename. lower(). endswith((". ttf", ". otf")):
+            font_path = os. path. join(fonts_dir, filename)
+            ctypes. windll. gdi32. AddFontResourceExW(font_path, FR_PRIVATE, 0)
+
+
+load_private_fonts()
 
 
 # ======================================
@@ -365,6 +400,9 @@ class DataEntryApp(ctk. CTk):
     def __init__(self):
         super(). __init__()
 
+        # 同梱フォントが実際に使える状態になっているか確認(コンソールに結果を出すだけ)
+        self. verify_custom_fonts()
+
         self. geometry("550x950")
         self. title("COLpama データ登録ツール")
         self. configure(fg_color = "#3b1d35")
@@ -577,6 +615,24 @@ class DataEntryApp(ctk. CTk):
             command = self. open_data_list
         )
         self. list_btn. pack(pady = (8, 20))
+
+
+    # ======================================
+    # 同梱フォント(fonts/)が実際にこのパソコンで使える状態になっているか確認する
+    # ======================================
+    def verify_custom_fonts(self):
+
+        import tkinter. font as tkfont
+
+        families = tkfont. families()
+
+        expected_fonts = ["ふてほど丸ゴシック"]
+
+        for font_name in expected_fonts:
+            if font_name in families:
+                print(f"[フォント確認] {font_name} : OK")
+            else:
+                print(f"[フォント確認] {font_name} : 見つかりません(代替フォントで表示されます)")
 
 
     # ======================================
