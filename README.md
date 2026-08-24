@@ -16,7 +16,7 @@ pip install -r requirements.txt
 ## 実行方法
 
 ```
-python TEST03.PY
+python main.py
 ```
 
 アプリ本体です。プロジェクトフォルダのどこから実行しても、実行時に自動でこのファイルがある場所に移動してから`colpama.db`や`images/`、`fonts/`を読み込むので、実行場所を気にする必要はありません。
@@ -35,7 +35,7 @@ python preset_entry_tool.py
 
 ## ファイル構成
 
-- `TEST03.PY` — アプリ本体
+- `main.py` — アプリ本体
 - `preset_entry_tool.py` — 配色データ登録ツール
 - `colpama.db` — 配色データ(SQLite)
 - `images/` — アプリ内で使用する画像
