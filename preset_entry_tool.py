@@ -816,7 +816,21 @@ class DataEntryApp(ctk. CTk):
 
     def on_hex_entry_enter(self, key):
 
-        value = self. color_widgets[key]["hex_entry"]. get(). strip()
+        value = self. normalize_hex(self. color_widgets[key]["hex_entry"]. get())
+
+        if value:
+            self. apply_color(key, value)
+        else:
+            print("無効なカラーコードです")
+
+
+    # ======================================
+    # カラーコードの文字列を「#RRGGBB」形式に補正する(#省略・大文字小文字を吸収)。
+    # 不正な文字列の場合はNoneを返す
+    # ======================================
+    def normalize_hex(self, value):
+
+        value = value. strip()
 
         if not value. startswith("#"):
             value = "#" + value
@@ -824,9 +838,11 @@ class DataEntryApp(ctk. CTk):
         if len(value) == 7:
             try:
                 int(value[1:], 16)
-                self. apply_color(key, value)
+                return value
             except ValueError:
-                print("無効なカラーコードです")
+                return None
+
+        return None
 
 
     # ======================================
@@ -861,12 +877,12 @@ class DataEntryApp(ctk. CTk):
         # 名前は自動採番(次に登録される番号)。編集(更新)の時は元の値を変えない
         name = str(self. registered_count + 1)
 
-        base_hex = self. color_widgets["base"]["hex_entry"]. get(). strip()
-        accent_hex = self. color_widgets["accent"]["hex_entry"]. get(). strip()
-        sub_hex = self. color_widgets["sub"]["hex_entry"]. get(). strip()
+        base_hex = self. normalize_hex(self. color_widgets["base"]["hex_entry"]. get())
+        accent_hex = self. normalize_hex(self. color_widgets["accent"]["hex_entry"]. get())
+        sub_hex = self. normalize_hex(self. color_widgets["sub"]["hex_entry"]. get())
 
         if not (base_hex and accent_hex and sub_hex):
-            print("3色すべて入力してください")
+            print("3色とも正しいカラーコード(#RRGGBBの6桁)を入力してください")
             return
 
         base_pct = self. get_pct("base")
